@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Brand green from public/arisan-icon.svg -->
+    <color name="launcher_icon_background">#047857</color>
+    <!-- App dark background (globals.css, .dark theme) -->
+    <color name="splash_background">#030706</color>
+    <color name="black">#FF000000</color>
+    <color name="white">#FFFFFFFF</color>
+</resources>

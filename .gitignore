@@ -46,3 +46,9 @@ scheduler-keypair.json
 /playwright-report/
 /blob-report/
 /playwright/.cache/
+
+# Android release artifacts and signing keys
+/dist/
+*.jks
+*.keystore
+/.next-e2e/

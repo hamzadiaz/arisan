@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Arisan mark (public/arisan-icon.svg): pot and member dots, scaled into the
+     66dp adaptive-icon safe zone of a 108dp canvas. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:fillColor="#ECFDF5"
+        android:pathData="M54,43.46a10.54,10.54 0,1 1,0 21.08a10.54,10.54 0,1 1,0 -21.08z" />
+    <path
+        android:fillColor="#ECFDF5"
+        android:pathData="M54,23.4a5.1,5.1 0,1 1,0 10.2a5.1,5.1 0,1 1,0 -10.2z" />
+</vector>

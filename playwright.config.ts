@@ -9,6 +9,7 @@ const BASE_URL = `http://127.0.0.1:${PORT}`;
 // API tests see the production-safe defaults (custodial off, no cron secret).
 const APP_ENV = [
   "NEXT_TELEMETRY_DISABLED=1",
+  "NEXT_DIST_DIR=.next-e2e",
   "NEXT_PUBLIC_SOLANA_RPC_URL=http://127.0.0.1:8899",
   "NEXT_PUBLIC_SOLANA_NETWORK=devnet",
   "CUSTODIAL_SIGNING_ENABLED=",
