@@ -1,20 +1,21 @@
-# UI proof — CLOCK IN mobile shell
+# UI proof — mobile shell
 
-390×844 viewport (@2x), Android/Seeker user agent, `next build && next start`, devnet.
-Each screen is captured in `dark-*` and `light-*`.
+390×844 @2x, `next build && next start`, `dark-*` and `light-*` for each screen.
 
 | # | Screen |
 |---|--------|
-| 01 | Welcome / wallet gate |
-| 02 | Connect sheet (Wallet Standard list; MWA + Seeker Connect register here on Android) |
-| 03 | Home: next payment + my pools (real devnet pools) |
-| 04 | Create pool |
-| 05 | Join by invite code (lookup against on-chain hash) |
-| 06 / 06b | Active pool: pay CTA, winners, members paid/due |
-| 07 | Completed pool: all winners with explorer links |
+| 01 | Welcome (disconnected) |
+| 02 | Home: next draw + pools |
+| 03 / 03b | Active pool: pay, winners, members paid/due |
+| 04 | Create |
+| 05 | Join: code lookup |
 
-Connected screens use a **watch-only** Wallet Standard test wallet injected by Playwright.
-It exposes a real devnet member address (`Xf2h…1e2Q`) so all data is live on-chain, and it
-refuses to sign. The create → invite-once → join → pay screens with real signatures
-need a funded devnet wallet on a phone/emulator (the devnet faucet was rate-limited when
-these were captured).
+Regenerate:
+
+```sh
+UI_PROOF=1 npx playwright test e2e/ui-proof.spec.ts
+```
+
+Connected screens (02, 03) use a watch-only Wallet Standard wallet that refuses to sign,
+against a mocked RPC serving Borsh-encoded Pool / Member / Payment / Draw accounts. Real
+signatures (create → invite → join → pay) need a funded devnet wallet on a device.

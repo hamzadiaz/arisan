@@ -14,11 +14,11 @@ import {
 const nav = (page: import("@playwright/test").Page) => page.locator("nav");
 
 test.describe("1. Home welcome", () => {
-  test("shows Save together, Connect wallet and the invite link", async ({ page }) => {
+  test("shows the heading, Connect wallet and the invite link", async ({ page }) => {
     await gotoReady(page, "/");
-    await expect(page.getByRole("heading", { name: /Save together\.\s*Take turns\./ })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Savings circles on Solana" })).toBeVisible();
     await expect(page.getByRole("button", { name: "Connect wallet" })).toBeVisible();
-    const invite = page.getByRole("link", { name: "Have an invite code?" });
+    const invite = page.getByRole("link", { name: "Join with code" });
     await expect(invite).toBeVisible();
     await expect(invite).toHaveAttribute("href", "/join");
     await proof(page, "01-home-welcome");
@@ -144,7 +144,7 @@ test.describe("5. Join", () => {
     // The app's RPC is unreachable here: that must not read as "wrong code" (E2E-5)
     await find.click();
     await expect(page.getByRole("alert").filter({ hasText: "Can't reach Solana" })).toBeVisible();
-    await expect(page.getByText("No pool matches that code.")).toHaveCount(0);
+    await expect(page.getByText("No pool with that code.")).toHaveCount(0);
     await proof(page, "05a-join-network-error");
   });
 
@@ -153,7 +153,7 @@ test.describe("5. Join", () => {
     await gotoReady(page, "/join");
     await page.getByPlaceholder("ABCD1234").fill("ZZZZ9999");
     await page.getByRole("button", { name: "Find pool" }).click();
-    await expect(page.getByText("No pool matches that code. Check it and try again.")).toBeVisible();
+    await expect(page.getByText("No pool with that code.")).toBeVisible();
     await expect(page.getByText("Can't reach Solana")).toHaveCount(0);
     await proof(page, "05c-join-no-match");
   });
@@ -178,7 +178,7 @@ test.describe("5. Join", () => {
 });
 
 test.describe("6. Create", () => {
-  test("name, amount, members, stake 1x/2x/3x, and Connect wallet to create", async ({ page }) => {
+  test("name, amount, members, stake None/1x/2x/3x, and Connect wallet to create", async ({ page }) => {
     await gotoReady(page, "/pools/create");
     const summary = (label: string) =>
       page.getByText(label, { exact: true }).locator("xpath=following-sibling::p[1]");
@@ -204,26 +204,29 @@ test.describe("6. Create", () => {
     await more.click();
     await more.click();
     await expect(page.getByText("4 rounds")).toBeVisible();
-    await expect(summary("Pot each round")).toHaveText("1 SOL");
+    await expect(summary("Pot")).toHaveText("1 SOL");
 
-    // Stake multiplier
+    // Stake: None / 1x / 2x / 3x segmented control, default 1x
     for (const [label, expected] of [
-      ["1× round", "0.25 SOL"],
-      ["2× round", "0.5 SOL"],
-      ["3× round", "0.75 SOL"],
+      ["1×", "0.25 SOL"],
+      ["2×", "0.5 SOL"],
+      ["3×", "0.75 SOL"],
     ] as const) {
-      const btn = page.getByRole("button", { name: label });
+      const btn = page.getByRole("button", { name: label, exact: true });
       await btn.click();
-      await expect(btn).toHaveClass(/border-primary/);
-      await expect(summary("Stake per member")).toHaveText(expected);
+      await expect(btn).toHaveAttribute("aria-pressed", "true");
+      await expect(summary("Stake each")).toHaveText(expected);
     }
     await proof(page, "06a-create-filled");
 
-    await page.getByText("Require a stake").click();
-    await expect(summary("Stake per member")).toHaveText("None");
-    await expect(page.getByRole("button", { name: "1× round" })).toHaveCount(0);
-    await page.getByText("Require a stake").click();
-    await expect(page.getByRole("button", { name: "3× round" })).toBeVisible();
+    await page.getByRole("button", { name: "None", exact: true }).click();
+    await expect(summary("Stake each")).toHaveText("None");
+    await expect(page.getByRole("button", { name: "3×", exact: true })).toHaveAttribute(
+      "aria-pressed",
+      "false"
+    );
+    await page.getByRole("button", { name: "1×", exact: true }).click();
+    await expect(summary("Stake each")).toHaveText("0.25 SOL");
 
     const submit = page.getByRole("button", { name: "Connect wallet to create" });
     await expect(submit).toBeEnabled();
@@ -249,7 +252,6 @@ test.describe("7. Pool detail", () => {
     await mockRpcWithPool(page);
     await gotoReady(page, "/pools/11111111111111111111111111111112");
     await expect(page.getByText("Pool not found")).toBeVisible();
-    await expect(page.getByText("Check the link and your network.")).toBeVisible();
     await expect(page.getByRole("link", { name: "Go home" })).toHaveAttribute("href", "/");
     expect(errors).toEqual([]);
     await proof(page, "07b-pool-not-found");
@@ -339,7 +341,7 @@ test.describe("9. CSS is applied", () => {
     expect(styles.btnBg).not.toBe("rgba(0, 0, 0, 0)");
     expect(styles.btnBg).not.toBe("rgb(239, 239, 239)"); // UA default button grey
     expect(styles.btnRadius).toBeGreaterThanOrEqual(12);
-    expect(styles.btnHeight).toBe(56); // h-14
+    expect(styles.btnHeight).toBe(48); // h-12
     expect(styles.btnDisplay).toBe("flex");
     expect(styles.navPosition).toBe("fixed");
     expect(styles.navBottom).toBe("0px");

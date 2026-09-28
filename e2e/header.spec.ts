@@ -62,6 +62,8 @@ test.describe("Header on every route (disconnected)", () => {
   }
 
   test("header stays on screen while scrolling", async ({ page }) => {
+    // Short viewport so the (compact) create form is guaranteed to scroll
+    await page.setViewportSize({ width: 390, height: 480 });
     await gotoReady(page, "/pools/create");
     await page.mouse.wheel(0, 2_000);
     await expect.poll(() => page.evaluate(() => window.scrollY)).toBeGreaterThan(0);
@@ -75,7 +77,7 @@ test.describe("Header on every route (disconnected)", () => {
     await gotoReady(page, "/join");
     await header(page).getByRole("button", { name: "Back" }).click();
     await expect(page).toHaveURL(/127\.0\.0\.1:\d+\/$/);
-    await expect(page.getByText("Save together.")).toBeVisible();
+    await expect(page.getByText("Savings circles on Solana")).toBeVisible();
   });
 
   test("Back after in-app navigation returns to the previous screen", async ({ page }) => {
@@ -96,7 +98,7 @@ test.describe("Header with a connected wallet", () => {
     await proof(page, "h-connected-home");
 
     // Home switches from the welcome screen to "My pools"
-    await expect(page.getByText("Save together.")).toHaveCount(0);
+    await expect(page.getByText("Savings circles on Solana")).toHaveCount(0);
     await expect(page.getByText("No pools yet")).toBeVisible();
 
     for (const route of ROUTES.slice(1)) {

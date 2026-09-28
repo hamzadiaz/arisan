@@ -4,8 +4,8 @@ import { use, useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { PublicKey } from "@solana/web3.js";
 import { useConnection, useWallet } from "@solana/wallet-adapter-react";
-import { Check, Clock, Crown, ExternalLink, RefreshCw, Trophy, WifiOff } from "lucide-react";
-import { AppShell, Panel, PrimaryButton, Section, StatusPill } from "@/components/mobile/app-shell";
+import { Check, Crown, ExternalLink, RefreshCw } from "lucide-react";
+import { AppShell, Panel, PrimaryButton, RoundBar, Section, StatusPill } from "@/components/mobile/app-shell";
 import { ConnectWalletButton } from "@/components/mobile/wallet-button";
 import { parsePublicKey, useSolanaPoolActions, useSolanaPoolData } from "@/hooks/use-solana-program";
 import type { FetchedDraw, FetchedMember, FetchedPayment, FetchedPool } from "@/lib/solana/accounts";
@@ -28,8 +28,8 @@ export default function PoolPage({ params }: { params: Promise<{ id: string }> }
   const actions = useSolanaPoolActions();
 
   const [data, setData] = useState<PoolData | null>(null);
-  const [loadFailed, setLoadFailed] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [loadFailed, setLoadFailed] = useState(false);
   const [, setTick] = useState(0);
 
   const fetchData = useCallback(async (): Promise<PoolData> => {
@@ -96,21 +96,17 @@ export default function PoolPage({ params }: { params: Promise<{ id: string }> }
   if (!data && loadFailed) {
     return (
       <AppShell title="Pool" back>
-        <Panel className="py-10 text-center">
-          <WifiOff className="mx-auto mb-3 size-8 text-muted-foreground" />
-          <p className="font-semibold">Can&apos;t reach Solana</p>
-          <p className="mt-1 text-sm text-muted-foreground">
-            The pool couldn&apos;t be loaded. Check your connection and try again.
-          </p>
+        <div className="py-16 text-center">
+          <p className="font-medium">Can&apos;t reach Solana</p>
           <button
             onClick={refresh}
             disabled={refreshing}
-            className="mt-4 inline-flex h-11 items-center gap-2 rounded-xl bg-muted px-4 text-sm font-semibold active:scale-95 disabled:opacity-50"
+            className="mt-3 inline-flex h-9 items-center gap-2 rounded-lg px-3 text-sm font-medium text-primary active:bg-muted disabled:opacity-50"
           >
             <RefreshCw className={cn("size-4", refreshing && "animate-spin")} />
             Try again
           </button>
-        </Panel>
+        </div>
       </AppShell>
     );
   }
@@ -119,9 +115,9 @@ export default function PoolPage({ params }: { params: Promise<{ id: string }> }
     return (
       <AppShell title="Pool" back>
         <div className="space-y-3">
-          <div className="h-48 animate-pulse rounded-3xl bg-muted" />
-          <div className="h-14 animate-pulse rounded-2xl bg-muted" />
-          <div className="h-40 animate-pulse rounded-2xl bg-muted" />
+          <div className="h-32 animate-pulse rounded-xl bg-muted" />
+          <div className="h-12 animate-pulse rounded-xl bg-muted" />
+          <div className="h-40 animate-pulse rounded-xl bg-muted" />
         </div>
       </AppShell>
     );
@@ -132,13 +128,12 @@ export default function PoolPage({ params }: { params: Promise<{ id: string }> }
   if (!pool) {
     return (
       <AppShell title="Pool" back>
-        <Panel className="py-10 text-center">
-          <p className="font-semibold">Pool not found</p>
-          <p className="mt-1 text-sm text-muted-foreground">Check the link and your network.</p>
-          <Link href="/" className="mt-4 inline-block font-semibold text-primary">
+        <div className="py-16 text-center">
+          <p className="font-medium">Pool not found</p>
+          <Link href="/" className="mt-3 inline-block text-sm font-medium text-primary">
             Go home
           </Link>
-        </Panel>
+        </div>
       </AppShell>
     );
   }
@@ -207,7 +202,6 @@ export default function PoolPage({ params }: { params: Promise<{ id: string }> }
   } else if (unclaimedWin) {
     primary = (
       <PrimaryButton onClick={() => claim(unclaimedWin)} disabled={busy}>
-        <Trophy className="size-5" />
         Claim {formatAmount(unclaimedWin.amount, pool.currency)}
       </PrimaryButton>
     );
@@ -215,9 +209,9 @@ export default function PoolPage({ params }: { params: Promise<{ id: string }> }
     primary = (
       <Link
         href="/join"
-        className="flex h-14 w-full items-center justify-center rounded-2xl bg-primary font-semibold text-primary-foreground"
+        className="flex h-12 w-full items-center justify-center rounded-xl bg-primary text-[15px] font-semibold text-primary-foreground"
       >
-        Join with invite code
+        Join with code
       </Link>
     );
   } else if (needsStake && pool.status === "pending") {
@@ -252,7 +246,7 @@ export default function PoolPage({ params }: { params: Promise<{ id: string }> }
   } else if (myMember && pool.status === "active") {
     primary = paidThisRound.has(me!) ? (
       <PrimaryButton disabled>
-        <Check className="size-5" />
+        <Check className="size-4" />
         Paid for round {pool.currentRound}
       </PrimaryButton>
     ) : (
@@ -264,68 +258,59 @@ export default function PoolPage({ params }: { params: Promise<{ id: string }> }
 
   return (
     <AppShell title={pool.name} back>
-      <div className="mb-4 rounded-3xl bg-gradient-to-br from-emerald-500 to-emerald-700 p-5 text-white shadow-xl shadow-emerald-900/20">
-        <div className="flex items-center justify-between">
-          <span className="rounded-full bg-white/20 px-3 py-1 text-xs font-semibold">
+      <Panel className="mb-3">
+        <div className="flex items-center justify-between text-[13px] text-muted-foreground">
+          <span>
             {pool.status === "active"
-              ? `Round ${pool.currentRound} of ${pool.durationMonths}`
+              ? drawIn
+                ? `Draw in ${drawIn}`
+                : "Draw due"
               : pool.status === "pending"
                 ? `${members.length} of ${pool.maxMembers} joined`
                 : "Completed"}
           </span>
           <button
             onClick={refresh}
-            className="flex size-9 items-center justify-center rounded-full bg-white/15 active:scale-95"
+            className="-m-2 flex size-9 items-center justify-center rounded-full active:bg-muted"
             aria-label="Refresh"
           >
             <RefreshCw className={cn("size-4", refreshing && "animate-spin")} />
           </button>
         </div>
-        <p className="mt-4 text-sm text-emerald-100">Pot</p>
-        <p className="text-4xl font-bold tracking-tight">{formatAmount(pot, pool.currency)}</p>
-        <div className="mt-4 flex items-center justify-between text-sm">
-          <span>{formatAmount(pool.monthlyAmount, pool.currency)} / round</span>
-          {pool.status === "active" && (
-            <span className="flex items-center gap-1.5 font-medium">
-              <Clock className="size-4" />
-              {drawIn ? `Draw in ${drawIn}` : "Draw due"}
-            </span>
-          )}
-        </div>
-      </div>
+        <p className="text-3xl font-semibold tracking-tight tabular-nums">{formatAmount(pot, pool.currency)}</p>
+        <p className="text-[13px] text-muted-foreground">
+          pot · {formatAmount(pool.monthlyAmount, pool.currency)} / round
+        </p>
+        {pool.status === "active" && <RoundBar round={pool.currentRound} total={pool.durationMonths} />}
+      </Panel>
 
-      {primary && <div className="mb-6">{primary}</div>}
+      {primary && <div className={pool.status === "active" ? "mb-2" : "mb-5"}>{primary}</div>}
 
       {pool.status === "active" && (
-        <p className="-mt-3 mb-6 px-1 text-center text-xs text-muted-foreground">
-          {paidThisRound.size} of {members.length} paid this round · the draw runs after the round
-          deadline and pays the winner from the vault
+        <p className="mb-5 text-center text-[13px] text-muted-foreground tabular-nums">
+          {paidThisRound.size}/{members.length} paid this round
         </p>
       )}
 
       {draws.length > 0 && (
         <Section title="Winners">
-          <ul className="space-y-2">
+          <ul className="divide-y divide-border overflow-hidden rounded-xl border border-border bg-card">
             {[...draws].reverse().map((d) => (
               <li key={d.id}>
                 <a
                   href={addressExplorerLink(d.id)}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="flex items-center gap-3 rounded-2xl border border-border bg-card p-3"
+                  className="flex items-center gap-3 px-4 py-3 active:bg-muted"
                 >
-                  <span className="flex size-10 items-center justify-center rounded-xl bg-amber-400/20 text-amber-600 dark:text-amber-300">
-                    <Trophy className="size-5" />
-                  </span>
+                  <span className="w-7 text-[13px] text-muted-foreground tabular-nums">#{d.round}</span>
                   <div className="min-w-0 flex-1">
-                    <p className="font-semibold">
-                      Round {d.round} · {d.winnerAddress === me ? "You" : shortAddress(d.winnerAddress)}
+                    <p className="font-mono text-sm">
+                      {d.winnerAddress === me ? "You" : shortAddress(d.winnerAddress)}
                     </p>
-                    <p className="text-sm text-muted-foreground">
-                      {formatAmount(d.amount, pool.currency)} · {d.drawnAt.toLocaleDateString()}
-                    </p>
+                    <p className="text-[13px] text-muted-foreground">{d.drawnAt.toLocaleDateString()}</p>
                   </div>
-                  <ExternalLink className="size-4 text-muted-foreground" />
+                  <span className="text-sm font-medium tabular-nums">{formatAmount(d.amount, pool.currency)}</span>
                 </a>
               </li>
             ))}
@@ -334,7 +319,7 @@ export default function PoolPage({ params }: { params: Promise<{ id: string }> }
       )}
 
       <Section title={`Members · ${members.length}/${pool.maxMembers}`}>
-        <ul className="divide-y divide-border overflow-hidden rounded-2xl border border-border bg-card">
+        <ul className="divide-y divide-border overflow-hidden rounded-xl border border-border bg-card">
           {members
             .slice()
             .sort((a, b) => (a.position ?? 0) - (b.position ?? 0))
@@ -342,44 +327,37 @@ export default function PoolPage({ params }: { params: Promise<{ id: string }> }
               const paid = paidThisRound.has(m.walletAddress);
               return (
                 <li key={m.id} className="flex items-center gap-3 px-4 py-3">
-                  <span className="flex size-9 items-center justify-center rounded-full bg-muted font-mono text-xs font-semibold">
+                  <span className="flex size-8 items-center justify-center rounded-full bg-muted font-mono text-[11px] font-semibold">
                     {m.walletAddress.slice(0, 2)}
                   </span>
                   <div className="min-w-0 flex-1">
-                    <p className="flex items-center gap-1.5 font-medium">
+                    <p className="flex items-center gap-1.5">
                       <span className="font-mono text-sm">
                         {m.walletAddress === me ? "You" : shortAddress(m.walletAddress)}
                       </span>
                       {m.walletAddress === pool.creatorId && <Crown className="size-3.5 text-amber-500" />}
                     </p>
-                    <p className="text-xs text-muted-foreground">
-                      {m.hasWon
-                        ? `Won round ${m.wonRound}`
-                        : pool.status === "pending" && pool.stakeEnabled !== false && !m.stakeDeposited
-                          ? "Stake pending"
-                          : m.inDefault
-                            ? "Missed a payment"
-                            : "Waiting for their turn"}
-                    </p>
+                    {memberNote(m, pool) && (
+                      <p className="text-xs text-muted-foreground">{memberNote(m, pool)}</p>
+                    )}
                   </div>
                   {pool.status === "active" && (
                     <span
                       className={cn(
-                        "rounded-full px-2.5 py-1 text-xs font-semibold",
+                        "rounded-full px-2 py-0.5 text-[11px] font-semibold",
                         paid ? "bg-primary/15 text-emerald-700 dark:text-primary" : "bg-muted text-muted-foreground"
                       )}
                     >
                       {paid ? "Paid" : "Due"}
                     </span>
                   )}
-                  {m.hasWon && <Trophy className="size-4 text-amber-500" />}
                 </li>
               );
             })}
           {Array.from({ length: Math.max(0, pool.maxMembers - members.length) }).map((_, i) => (
             <li key={`open-${i}`} className="flex items-center gap-3 px-4 py-3 text-muted-foreground">
-              <span className="size-9 rounded-full border-2 border-dashed border-border" />
-              <span className="text-sm">Open seat</span>
+              <span className="size-8 rounded-full border border-dashed border-border" />
+              <span className="text-sm">Open</span>
             </li>
           ))}
         </ul>
@@ -393,10 +371,17 @@ export default function PoolPage({ params }: { params: Promise<{ id: string }> }
           rel="noopener noreferrer"
           className="flex items-center gap-1 font-medium"
         >
-          View on explorer
+          Explorer
           <ExternalLink className="size-3.5" />
         </a>
       </div>
     </AppShell>
   );
+}
+
+function memberNote(m: FetchedMember, pool: FetchedPool): string | null {
+  if (m.hasWon) return `Won round ${m.wonRound}`;
+  if (pool.status === "pending" && pool.stakeEnabled !== false && !m.stakeDeposited) return "Stake pending";
+  if (m.inDefault) return "Missed a payment";
+  return null;
 }
