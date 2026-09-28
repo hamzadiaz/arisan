@@ -6,7 +6,9 @@ import { PublicKey } from "@solana/web3.js";
 import { useWallet } from "@solana/wallet-adapter-react";
 import { useWalletModal } from "@solana/wallet-adapter-react-ui";
 import { AppShell, Panel, PrimaryButton, StatusPill } from "@/components/mobile/app-shell";
+import { Art } from "@/components/mobile/art";
 import { useSolanaPoolActions, useSolanaPoolData } from "@/hooks/use-solana-program";
+import { ASSETS } from "@/lib/assets";
 import type { FetchedPool } from "@/lib/solana/accounts";
 import { formatAmount } from "@/lib/format";
 import { poolToasts, txErrorToast, dismissToast } from "@/lib/solana/transaction-toast";
@@ -77,6 +79,7 @@ export default function JoinPage() {
 
   return (
     <AppShell title="Join a pool" back>
+      {!pool && <Art src={ASSETS.joinCode} className="mx-auto mb-3 size-24" />}
       <div className="mb-3 flex h-14 items-center gap-2 rounded-xl border border-border bg-card pl-4 pr-1.5 focus-within:border-primary">
         <input
           value={code}

@@ -6,6 +6,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { ChevronLeft, Home, Plus, Ticket } from "lucide-react";
 import { ThemeToggle } from "@/components/layout/theme-toggle";
 import { WalletChip } from "@/components/mobile/wallet-button";
+import { ASSETS } from "@/lib/assets";
 import { cn } from "@/lib/utils";
 
 const NAV = [
@@ -51,7 +52,7 @@ export function AppShell({ title, back, children }: AppShellProps) {
           ) : (
             <Link href="/" className="-ml-1 mr-1.5 flex shrink-0 items-center" aria-label="Arisan home">
               {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src="/arisan-icon.svg" alt="" className="size-7 rounded-lg" />
+              <img src={ASSETS.logoMark} alt="" className="size-8 object-contain" />
             </Link>
           )}
           <h1 className="flex-1 truncate text-[17px] font-semibold tracking-tight">

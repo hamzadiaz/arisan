@@ -32,6 +32,12 @@ export default defineConfig({
   use: {
     baseURL: BASE_URL,
     trace: "retain-on-failure",
+    // The first-visit walkthrough covers the app; specs start past it unless they opt out
+    // (e2e/walkthrough.spec.ts clears storage to test it).
+    storageState: {
+      cookies: [],
+      origins: [{ origin: BASE_URL, localStorage: [{ name: "arisan.walkthrough.v1", value: "done" }] }],
+    },
   },
   projects: [
     {

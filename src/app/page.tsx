@@ -6,6 +6,8 @@ import { useWallet } from "@solana/wallet-adapter-react";
 import { ChevronRight } from "lucide-react";
 import { AppShell, RoundBar, Section, StatusPill } from "@/components/mobile/app-shell";
 import { ConnectWalletButton } from "@/components/mobile/wallet-button";
+import { Art } from "@/components/mobile/art";
+import { ASSETS } from "@/lib/assets";
 import { useSolanaPoolData } from "@/hooks/use-solana-program";
 import type { FetchedPool } from "@/lib/solana/accounts";
 import { formatAmount, timeUntil } from "@/lib/format";
@@ -113,7 +115,10 @@ function MyPools() {
             ))}
           </div>
         ) : pools.length === 0 ? (
-          <p className="px-1 py-6 text-sm text-muted-foreground">No pools yet</p>
+          <div className="flex flex-col items-center py-6 text-center">
+            <Art src={ASSETS.emptyPools} className="size-28" />
+            <p className="mt-2 text-sm text-muted-foreground">No pools yet</p>
+          </div>
         ) : (
           <ul className="divide-y divide-border overflow-hidden rounded-xl border border-border bg-card">
             {pools.map((pool) => (
