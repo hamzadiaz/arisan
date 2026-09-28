@@ -97,6 +97,9 @@ export interface TransactionResult {
   explorerLink?: string;
   error?: string;
   logs?: string[];
+  returnData?: string;
+  poolAddress?: string;
+  inviteCode?: string;
 }
 
 // Hook for executing on-chain pool actions
@@ -161,8 +164,15 @@ export function useSolanaPoolActions() {
               commitment: "confirmed",
               maxSupportedTransactionVersion: 0,
             });
-            logs = txDetails?.meta?.logMessages || undefined;
-            returnData = txDetails?.meta?.returnData?.data?.[0];
+            const meta = txDetails?.meta as
+              | {
+                  logMessages?: string[] | null;
+                  returnData?: { data?: [string, string] } | null;
+                }
+              | null
+              | undefined;
+            logs = meta?.logMessages || undefined;
+            returnData = meta?.returnData?.data?.[0];
           } catch (logErr) {
             console.warn("Failed to fetch transaction logs:", logErr);
           }
