@@ -23,8 +23,8 @@ mv public/icons/icon-180.png src/app/apple-icon.png
 for density in mdpi:48 hdpi:72 xhdpi:96 xxhdpi:144 xxxhdpi:192; do
   name=${density%%:*} size=${density##*:}
   fg=$((size * 108 / 48)) inner=$((size * 108 / 48 * 70 / 100))
-  magick public/icons/icon-512.png -resize "${size}x${size}" "$RES/mipmap-$name/ic_launcher.webp"
+  magick public/icons/icon-512.png -resize "${size}x${size}" -define webp:lossless=true "$RES/mipmap-$name/ic_launcher.webp"
   cp "$RES/mipmap-$name/ic_launcher.webp" "$RES/mipmap-$name/ic_launcher_round.webp"
-  magick "$SRC" -trim +repage -resize "${inner}x${inner}" -background none -gravity center -extent "${fg}x${fg}" "$RES/mipmap-$name/ic_launcher_foreground.webp"
+  magick "$SRC" -trim +repage -resize "${inner}x${inner}" -background none -gravity center -extent "${fg}x${fg}" -define webp:lossless=true "$RES/mipmap-$name/ic_launcher_foreground.webp"
 done
 echo "icons written: src/app/icon.png public/icons/logo-mark.png src/app/apple-icon.png public/icons/icon-{192,512}.png $RES/mipmap-*/ic_launcher*.webp"
