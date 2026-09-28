@@ -25,11 +25,13 @@ export default function JoinPage() {
   const [pool, setPool] = useState<FetchedPool | null>(null);
   const [searching, setSearching] = useState(false);
   const [notFound, setNotFound] = useState(false);
+  const [lookupFailed, setLookupFailed] = useState(false);
 
   const updateCode = (raw: string) => {
     setCode(raw.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, CODE_LENGTH));
     setPool(null);
     setNotFound(false);
+    setLookupFailed(false);
   };
 
   const paste = async () => {
@@ -43,10 +45,18 @@ export default function JoinPage() {
   const find = async () => {
     setSearching(true);
     setNotFound(false);
-    const found = await getPoolByInviteCode(code);
-    setPool(found);
-    setNotFound(!found);
-    setSearching(false);
+    setLookupFailed(false);
+    try {
+      const found = await getPoolByInviteCode(code);
+      setPool(found);
+      setNotFound(!found);
+    } catch (error) {
+      // An unreachable network is not the same as a wrong code
+      console.error("Invite lookup failed:", error);
+      setLookupFailed(true);
+    } finally {
+      setSearching(false);
+    }
   };
 
   const join = async () => {
@@ -90,6 +100,11 @@ export default function JoinPage() {
         </div>
         {notFound && (
           <p className="mt-2 px-1 text-sm text-destructive">No pool matches that code. Check it and try again.</p>
+        )}
+        {lookupFailed && (
+          <p role="alert" className="mt-2 px-1 text-sm text-destructive">
+            Can&apos;t reach Solana right now. Check your connection and try again.
+          </p>
         )}
       </Section>
 

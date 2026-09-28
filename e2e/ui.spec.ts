@@ -141,9 +141,21 @@ test.describe("5. Join", () => {
     await page.getByRole("button", { name: "Paste" }).click();
     await expect(input).toHaveValue("QWER7890");
 
+    // The app's RPC is unreachable here: that must not read as "wrong code" (E2E-5)
     await find.click();
+    await expect(page.getByRole("alert").filter({ hasText: "Can't reach Solana" })).toBeVisible();
+    await expect(page.getByText("No pool matches that code.")).toHaveCount(0);
+    await proof(page, "05a-join-network-error");
+  });
+
+  test("a wrong code on a reachable network reports no match", async ({ page }) => {
+    await mockRpcWithPool(page);
+    await gotoReady(page, "/join");
+    await page.getByPlaceholder("ABCD1234").fill("ZZZZ9999");
+    await page.getByRole("button", { name: "Find pool" }).click();
     await expect(page.getByText("No pool matches that code. Check it and try again.")).toBeVisible();
-    await proof(page, "05a-join-not-found");
+    await expect(page.getByText("Can't reach Solana")).toHaveCount(0);
+    await proof(page, "05c-join-no-match");
   });
 
   test("Find pool shows a matching pool and asks to connect before joining", async ({ page }) => {
@@ -234,6 +246,7 @@ test.describe("7. Pool detail", () => {
   test("an unknown pool address shows an honest not-found state", async ({ page }) => {
     const errors: string[] = [];
     page.on("pageerror", (e) => errors.push(e.message));
+    await mockRpcWithPool(page);
     await gotoReady(page, "/pools/11111111111111111111111111111112");
     await expect(page.getByText("Pool not found")).toBeVisible();
     await expect(page.getByText("Check the link and your network.")).toBeVisible();
@@ -242,16 +255,43 @@ test.describe("7. Pool detail", () => {
     await proof(page, "07b-pool-not-found");
   });
 
-  test("a malformed pool id shows not-found instead of loading forever", async ({ page }) => {
-    // FINDING E2E-1: getPool() builds `new PublicKey(id)` outside fetchPool's try/catch, so
-    // the rejected promise leaves the skeleton up forever. Expected to fail until fixed;
-    // remove test.fail() once the page renders "Pool not found" for malformed ids.
-    test.fail(true, "E2E-1: /pools/<malformed-id> never leaves the loading skeleton");
+  test("a malformed pool id shows not-found instead of loading forever (E2E-1)", async ({
+    page,
+  }) => {
+    const errors: string[] = [];
+    page.on("pageerror", (e) => errors.push(e.message));
     await gotoReady(page, "/pools/not-a-pool");
-    // The unknown-pubkey case resolves in ~1s; give this one 8s, then capture what users see.
-    await page.waitForTimeout(8_000);
-    await proof(page, "07c-pool-malformed-id-after-8s");
-    await expect(page.getByText("Pool not found")).toBeVisible({ timeout: 1_000 });
+    await expect(page.getByText("Pool not found")).toBeVisible({ timeout: 3_000 });
+    await expect(page.locator("header h1")).toHaveText("Pool");
+    expect(errors, "no uncaught Non-base58 error").toEqual([]);
+    await proof(page, "07c-pool-malformed-id");
+  });
+
+  test("an unreachable RPC is reported as a network error with retry (E2E-4)", async ({ page }) => {
+    await gotoReady(page, `/pools/${MOCK_POOL.address.toBase58()}`);
+    await expect(page.getByText("Can't reach Solana")).toBeVisible();
+    await expect(page.getByText("Pool not found")).toHaveCount(0);
+    await proof(page, "07d-pool-network-error");
+
+    // Network comes back: Try again loads the pool without a reload
+    await mockRpcWithPool(page);
+    await page.getByRole("button", { name: "Try again" }).click();
+    await expect(page.locator("header h1")).toHaveText(MOCK_POOL.name);
+  });
+
+  test("the pool page loads its data once, not twice (provider remount, E2E-6)", async ({
+    page,
+  }) => {
+    await mockRpcWithPool(page);
+    const methods: string[] = [];
+    page.on("request", (r) => {
+      if (r.url().startsWith("http://127.0.0.1:8899")) methods.push(r.postDataJSON()?.method);
+    });
+    await gotoReady(page, `/pools/${MOCK_POOL.address.toBase58()}`);
+    await expect(page.locator("header h1")).toHaveText(MOCK_POOL.name);
+    await page.waitForTimeout(2_000);
+    // members + payments + draws: one getProgramAccounts each per load
+    expect(methods.filter((m) => m === "getProgramAccounts")).toHaveLength(3);
   });
 });
 
@@ -293,8 +333,8 @@ test.describe("9. CSS is applied", () => {
     expect(styles.sheets).toBeGreaterThan(0);
     expect(styles.primary).not.toBe("");
     expect(styles.bodyBg).not.toMatch(/^rgba\(0, 0, 0, 0\)$|^rgb\(255, 255, 255\)$/);
-    // Tailwind's sans stack, not the UA default serif
-    expect(styles.bodyFont).toMatch(/sans/);
+    // Styled font stack (Geist, see 9b), not the UA default serif
+    expect(styles.bodyFont).toMatch(/geist|sans/i);
     expect(styles.bodyFont.toLowerCase()).not.toMatch(/^"?times/);
     expect(styles.btnBg).not.toBe("rgba(0, 0, 0, 0)");
     expect(styles.btnBg).not.toBe("rgb(239, 239, 239)"); // UA default button grey
@@ -306,14 +346,20 @@ test.describe("9. CSS is applied", () => {
   });
 });
 
-test("9b. Geist is the rendered sans font", async ({ page }) => {
-  // FINDING E2E-2: `@theme inline { --font-sans: var(--font-geist-sans) }` is resolved on
-  // <html>, but next/font defines --font-geist-sans on <body>, so text falls back to
-  // ui-sans-serif. Remove test.fail() once body text renders in Geist.
-  test.fail(true, "E2E-2: Geist font variable is out of scope where --font-sans resolves");
+test("9b. Geist is the rendered sans font (E2E-2)", async ({ page }) => {
   await gotoReady(page, "/");
-  const font = await page.evaluate(() => getComputedStyle(document.body).fontFamily);
-  expect(font.toLowerCase()).toContain("geist");
+  const fonts = await page.evaluate(async () => {
+    await document.fonts.ready;
+    const family = (el: Element) => getComputedStyle(el).fontFamily.toLowerCase();
+    return {
+      body: family(document.body),
+      heading: family(document.querySelector("main h2")!),
+      loaded: [...document.fonts].some((f) => /geist/i.test(f.family) && f.status === "loaded"),
+    };
+  });
+  expect(fonts.body).toContain("geist");
+  expect(fonts.heading).toContain("geist");
+  expect(fonts.loaded, "a Geist font face actually loaded").toBe(true);
 });
 
 test.describe("10. Safe-area shell", () => {

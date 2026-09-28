@@ -7,17 +7,23 @@ import {
 } from "@solana/wallet-adapter-react";
 import { WalletModalProvider } from "@solana/wallet-adapter-react-ui";
 import { WalletError } from "@solana/wallet-adapter-base";
-import { clusterApiUrl } from "@solana/web3.js";
+import { clusterApiUrl, type ConnectionConfig } from "@solana/web3.js";
 
 // Import wallet adapter styles
 import "@solana/wallet-adapter-react-ui/styles.css";
+
+// ConnectionProvider's default config is a new object per render, which builds a new
+// Connection (and refetches every reader) whenever this provider re-renders.
+const CONNECTION_CONFIG: ConnectionConfig = { commitment: "confirmed" };
 
 interface SolanaProviderProps {
   children: ReactNode;
 }
 
 export function SolanaProvider({ children }: SolanaProviderProps) {
-  // Prevent hydration mismatch - only render wallet provider on client
+  // Auto-connect only after mount; the provider tree itself must never change shape,
+  // or React remounts every page (state lost, effects and RPC reads run twice) and
+  // header taps before mount hit the no-op default wallet-modal context.
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
@@ -40,20 +46,9 @@ export function SolanaProvider({ children }: SolanaProviderProps) {
     console.error("Wallet error:", error.name, error.message);
   }, []);
 
-  // Prevent hydration mismatch by not rendering wallet UI until mounted
-  if (!mounted) {
-    return (
-      <ConnectionProvider endpoint={endpoint}>
-        <WalletProvider wallets={wallets} onError={onError} autoConnect={false}>
-          {children}
-        </WalletProvider>
-      </ConnectionProvider>
-    );
-  }
-
   return (
-    <ConnectionProvider endpoint={endpoint}>
-      <WalletProvider wallets={wallets} onError={onError} autoConnect>
+    <ConnectionProvider endpoint={endpoint} config={CONNECTION_CONFIG}>
+      <WalletProvider wallets={wallets} onError={onError} autoConnect={mounted}>
         <WalletModalProvider>{children}</WalletModalProvider>
       </WalletProvider>
     </ConnectionProvider>

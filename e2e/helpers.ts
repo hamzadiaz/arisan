@@ -27,6 +27,8 @@ export async function openWalletSheet(page: Page, trigger: () => Promise<void>) 
     if (!(await walletSheet(page).isVisible())) await trigger();
     await expect(walletSheet(page)).toBeVisible({ timeout: 1_000 });
   }).toPass({ timeout: 15_000 });
+  // Playwright treats opacity 0 as visible; wait until the fade-in has finished.
+  await expect(walletSheet(page)).toHaveCSS("opacity", "1");
 }
 
 export const FORBIDDEN_COPY = /stripe|custodial|\bnfts?\b|credit card|debit card|card payment/i;
@@ -141,4 +143,91 @@ export async function mockRpcWithPool(page: Page) {
       body: JSON.stringify(Array.isArray(body) ? body.map(reply) : reply(body)),
     });
   });
+}
+
+// ---------------------------------------------------------------------------
+// Mock Wallet Standard wallet. It registers the same way Phantom or MWA do, so the
+// app's own wallet-adapter stack discovers it, lists it in the sheet and connects.
+// It refuses to sign: these tests cover identity, not transactions.
+// ---------------------------------------------------------------------------
+
+export const MOCK_WALLET = {
+  name: "E2E Wallet",
+  address: "7Np41oeYqPefeNQEHSv1UDhYrehxin3NStELsSKCT4K2",
+};
+export const MOCK_WALLET_SHORT = `${MOCK_WALLET.address.slice(0, 4)}…${MOCK_WALLET.address.slice(-4)}`;
+
+export async function installMockWallet(page: Page) {
+  const publicKey = [...new PublicKey(MOCK_WALLET.address).toBytes()];
+  await page.addInitScript(
+    ({ name, address, publicKey }) => {
+      const chains = ["solana:devnet", "solana:testnet", "solana:mainnet", "solana:localnet"];
+      const account = {
+        address,
+        publicKey: new Uint8Array(publicKey),
+        chains,
+        features: ["solana:signTransaction"],
+      };
+      let accounts: (typeof account)[] = [];
+      const listeners: Record<string, ((props: unknown) => void)[]> = {};
+      const emit = () => (listeners.change ?? []).forEach((l) => l({ accounts }));
+      const wallet = {
+        version: "1.0.0",
+        name,
+        icon: "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciLz4=",
+        chains,
+        get accounts() {
+          return accounts;
+        },
+        features: {
+          "standard:connect": {
+            version: "1.0.0",
+            connect: async () => {
+              accounts = [account];
+              emit();
+              return { accounts };
+            },
+          },
+          "standard:disconnect": {
+            version: "1.0.0",
+            disconnect: async () => {
+              accounts = [];
+              emit();
+            },
+          },
+          "standard:events": {
+            version: "1.0.0",
+            on: (event: string, listener: (props: unknown) => void) => {
+              (listeners[event] ??= []).push(listener);
+              return () => {
+                listeners[event] = listeners[event].filter((l) => l !== listener);
+              };
+            },
+          },
+          "solana:signTransaction": {
+            version: "1.0.0",
+            supportedTransactionVersions: ["legacy", 0],
+            signTransaction: async () => {
+              throw new Error("E2E wallet does not sign");
+            },
+          },
+        },
+      };
+      const register = ({ register }: { register: (w: unknown) => void }) => register(wallet);
+      window.addEventListener("wallet-standard:app-ready", (e) =>
+        register((e as CustomEvent).detail)
+      );
+      window.dispatchEvent(new CustomEvent("wallet-standard:register-wallet", { detail: register }));
+    },
+    { name: MOCK_WALLET.name, address: MOCK_WALLET.address, publicKey }
+  );
+}
+
+/** Connect the mock wallet through the real header chip and wallet sheet. */
+export async function connectMockWallet(page: Page) {
+  await openWalletSheet(page, () =>
+    page.locator("header").getByRole("button", { name: "Connect", exact: true }).click()
+  );
+  await walletSheet(page).getByRole("button", { name: new RegExp(MOCK_WALLET.name) }).click();
+  await expect(page.locator("header").getByText(MOCK_WALLET_SHORT)).toBeVisible();
 }
