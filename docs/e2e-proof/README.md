@@ -5,7 +5,7 @@ Screenshots: [`ui/`](ui/), mobile 390×844, dark colour scheme, Chromium.
 
 ```bash
 npm run test:security   # Anchor: cargo test -p arisan_contracts --test security_p0 (4 tests)
-npm run test:e2e:ui     # Playwright UI + API + header against `next build && next start` (53 tests)
+npm run test:e2e:ui     # Playwright UI + API + header against `next build && next start` (56 tests)
 npm run test:e2e        # both
 ```
 
@@ -32,6 +32,7 @@ npm run test:e2e        # both
 | 10 | Safe-area shell max-width 480px | › 10. Safe-area shell (`viewport-fit=cover`, safe-area-inset rules, 390 px at mobile, capped at 480 px on a 1024 px viewport, no horizontal overflow) | `ui/10-shell-480-on-wide-viewport.png` |
 | 11 | `POST /api/custodial/create-wallet` → 410 | `api.spec.ts` › 11-12 (also `GET` → 410) | log |
 | 12 | `POST /api/custodial/sign-transaction` → 410 | `api.spec.ts` › 11-12 | log |
+| 12b | Stripe card on-ramp off (delivery bar 4) | `api.spec.ts` › Stripe on-ramp: `POST`/`GET /api/stripe/checkout` and `POST /api/stripe/webhook` → 410 | log |
 | 13 | Cron draw without `CRON_SECRET` → 401/403 | `api.spec.ts` › 13 (GET no header, GET `Bearer ` / `Bearer undefined`, POST no secret: all 401) | log |
 | 14 | Create pool + hashed invite | `security_p0` › `join_requires_the_hashed_invite_code` (stored hash = SHA-256(code); plaintext not in the account bytes); `program_flow_…` | log |
 | 15 | Join with correct code / reject wrong code | `join_requires_the_hashed_invite_code` (wrong code and lowercase variant → `Invalid invite code`, no member PDA created, count unchanged; correct code joins at position 1) | log |
@@ -84,6 +85,8 @@ Each fix has a regression test.
 
 | E2E-10 | A stake pool could be started before every member had staked. On-chain, an unstaked member of a started pool can neither stake nor pay (issue #8), yet the UI showed them a Pay button that was bound to fail. | Start is disabled until everyone has staked ("Waiting for stakes (x/y)"). An unstaked member of an already-started pool sees "payments are blocked". | pool-actions › E2E-10 (2 tests) |
 | E2E-11 | A member slashed into the grace period saw only "Pay", which fails with `StakeNotDeposited`. The UI never offered the restake the program allows, and a removed member still saw Pay. | "Restake to stay in" (`deposit_stake`) for members in grace; removed members see a disabled state. | pool-actions › E2E-11, "removed member" |
+
+| E2E-12 | The Stripe routes were live. `GET /api/stripe/checkout` returned a quote (200), and a signed webhook would send treasury SOL to a custodial wallet. CLOCK IN is self-custodial, and the on-ramp is out of scope. | Every Stripe route returns 410 unless `STRIPE_ONRAMP_ENABLED=true`. The webhook is gated before it touches the treasury. | api › Stripe on-ramp (3 tests) |
 
 `e2e/pool-actions.spec.ts` covers the pool screen's primary action for each member state: visitor, unstaked member, authority waiting or ready to start, pay, paid, grace, unstaked-after-start, and removed. It runs against a fake chain of Pool, Member and Payment accounts at their real PDAs, and asserts which instruction each button asks the wallet to sign.
 

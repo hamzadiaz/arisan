@@ -1,11 +1,19 @@
 import { NextRequest, NextResponse } from "next/server";
 import { verifyFirebaseToken } from "@/lib/firebase-admin";
-import { createCheckoutSession, getSolPriceUsd, calculateSolForUsd } from "@/lib/stripe";
+import {
+  calculateSolForUsd,
+  createCheckoutSession,
+  getSolPriceUsd,
+  stripeOnrampDisabledResponse,
+  stripeOnrampEnabled,
+} from "@/lib/stripe";
 import { withRateLimit } from "@/lib/rate-limit";
 import { fundWalletSchema, validateInput } from "@/lib/validations";
 import { getAdminDb } from "@/lib/firebase-admin";
 
 export async function POST(request: NextRequest) {
+  if (!stripeOnrampEnabled()) return stripeOnrampDisabledResponse();
+
   try {
     // Rate limiting
     const rateLimitResponse = await withRateLimit(request, "strict");
@@ -103,6 +111,8 @@ export async function POST(request: NextRequest) {
 
 // GET endpoint to get current SOL price and quote
 export async function GET(request: NextRequest) {
+  if (!stripeOnrampEnabled()) return stripeOnrampDisabledResponse();
+
   try {
     const { searchParams } = new URL(request.url);
     const amountStr = searchParams.get("amount");

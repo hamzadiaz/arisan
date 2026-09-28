@@ -1,4 +1,18 @@
 import Stripe from "stripe";
+import { NextResponse } from "next/server";
+
+// The Stripe on-ramp funds a server-held custodial wallet from a treasury key. CLOCK IN
+// is self-custodial only (docs/CLOCKIN.md), so every Stripe route is off unless opted in.
+export function stripeOnrampEnabled(): boolean {
+  return process.env.STRIPE_ONRAMP_ENABLED === "true";
+}
+
+export function stripeOnrampDisabledResponse() {
+  return NextResponse.json(
+    { error: "The card on-ramp is disabled. CLOCK IN uses a self-custodial wallet." },
+    { status: 410 }
+  );
+}
 
 // Initialize Stripe client
 const stripeSecretKey = process.env.STRIPE_SECRET_KEY;

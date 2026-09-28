@@ -326,6 +326,10 @@ export async function signRequests(page: Page) {
     const tx = Transaction.from(Buffer.from(bytes));
     return tx.instructions
       .filter((ix) => ix.programId.equals(PROGRAM_ID))
-      .map((ix) => coder.decode(ix.data));
+      .map((ix) => {
+        const decoded = coder.decode(ix.data);
+        if (!decoded) throw new Error("Arisan instruction did not decode against the IDL");
+        return decoded;
+      });
   });
 }

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { verifyWebhookSignature } from "@/lib/stripe";
+import { stripeOnrampDisabledResponse, stripeOnrampEnabled, verifyWebhookSignature } from "@/lib/stripe";
 import { transferSolToUser, recordDeposit, updateDepositStatus } from "@/lib/treasury";
 import Stripe from "stripe";
 
@@ -7,6 +7,9 @@ import Stripe from "stripe";
 export const runtime = "nodejs";
 
 export async function POST(request: NextRequest) {
+  // Never move treasury SOL while the on-ramp is off, even for a validly signed event
+  if (!stripeOnrampEnabled()) return stripeOnrampDisabledResponse();
+
   try {
     const body = await request.text();
     const signature = request.headers.get("stripe-signature");
