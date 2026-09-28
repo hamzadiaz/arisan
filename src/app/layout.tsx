@@ -1,8 +1,8 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import { ThemeProvider } from "@/components/providers/theme-provider";
 import { SolanaProvider } from "@/components/providers/solana-provider";
-import { AuthProvider } from "@/components/providers/auth-provider";
+import { MobileWalletRegistration } from "@/components/providers/mobile-wallet-registration";
 import { Toaster } from "@/components/ui/sonner";
 import "./globals.css";
 
@@ -17,9 +17,9 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Arisan - Trustless Rotating Savings on Solana",
+  title: "Arisan - Savings circles on Solana",
   description:
-    "Join peer-to-peer rotating savings pools on Solana. Contribute monthly, win the pot fairly via blockchain. Zero-interest, transparent, trustless.",
+    "Save together with people you trust. Everyone pays in each round, one member takes the pot. Zero interest. Your keys stay in your wallet.",
   keywords: [
     "arisan",
     "rotating savings",
@@ -31,11 +31,21 @@ export const metadata: Metadata = {
   ],
   authors: [{ name: "Arisan" }],
   openGraph: {
-    title: "Arisan - Trustless Rotating Savings on Solana",
+    title: "Arisan - Savings circles on Solana",
     description:
-      "Join peer-to-peer rotating savings pools on Solana. Contribute monthly, win the pot fairly via blockchain.",
+      "Save together with people you trust. Everyone pays in each round, one member takes the pot.",
     type: "website",
   },
+};
+
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  viewportFit: "cover",
+  themeColor: [
+    { media: "(prefers-color-scheme: light)", color: "#fafafa" },
+    { media: "(prefers-color-scheme: dark)", color: "#030706" },
+  ],
 };
 
 export default function RootLayout({
@@ -46,7 +56,7 @@ export default function RootLayout({
   return (
     <html lang="en" suppressHydrationWarning>
       <body
-        className={`${geistSans.variable} ${geistMono.variable} antialiased h-screen overflow-hidden`}
+        className={`${geistSans.variable} ${geistMono.variable} antialiased`}
       >
         <ThemeProvider
           attribute="class"
@@ -54,11 +64,10 @@ export default function RootLayout({
           enableSystem
           disableTransitionOnChange
         >
+          <MobileWalletRegistration />
           <SolanaProvider>
-            <AuthProvider>
-              {children}
-              <Toaster />
-            </AuthProvider>
+            {children}
+            <Toaster position="top-center" />
           </SolanaProvider>
         </ThemeProvider>
       </body>
