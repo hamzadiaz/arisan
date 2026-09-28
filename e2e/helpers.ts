@@ -101,6 +101,7 @@ export interface MockMember {
 
 export interface MockScenario {
   authority?: PublicKey;
+  maxMembers?: number;
   status?: "Pending" | "Active";
   currentRound?: number;
   members?: MockMember[];
@@ -124,11 +125,11 @@ async function encodeMockPool(scenario: MockScenario): Promise<Buffer> {
   return coder.encode("Pool", {
     authority: scenario.authority ?? MOCK_POOL.authority,
     name: [...name],
-    max_members: MOCK_POOL.maxMembers,
+    max_members: scenario.maxMembers ?? MOCK_POOL.maxMembers,
     member_count: members.length,
     contribution_amount: new BN(MOCK_POOL.lamportsPerRound),
     currency: { Sol: {} },
-    total_rounds: MOCK_POOL.maxMembers,
+    total_rounds: scenario.maxMembers ?? MOCK_POOL.maxMembers,
     current_round: active ? (scenario.currentRound ?? 1) : 0,
     status: { [scenario.status ?? "Pending"]: {} },
     next_draw_timestamp: new BN(active ? Math.floor(Date.now() / 1000) + 3 * 86_400 : 0),

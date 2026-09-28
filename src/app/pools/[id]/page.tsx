@@ -197,6 +197,9 @@ export default function PoolPage({ params }: { params: Promise<{ id: string }> }
   // start_pool does not check stakes on-chain; an unstaked member of a started pool can
   // neither stake nor pay. Only offer Start once everyone has staked.
   const staked = stakePool ? members.filter((m) => m.stakeDeposited).length : members.length;
+  // total_rounds is fixed to max_members on-chain; a pool started below capacity runs
+  // out of eligible winners and never completes, locking stakes (issue #13).
+  const full = members.length >= pool.maxMembers;
 
   let primary: React.ReactNode = null;
   if (!connected) {
@@ -225,14 +228,14 @@ export default function PoolPage({ params }: { params: Promise<{ id: string }> }
     );
   } else if (isAuthority && pool.status === "pending") {
     primary = (
-      <PrimaryButton onClick={start} disabled={busy || members.length < 2 || staked < members.length}>
-        {members.length < 2
-          ? "Waiting for members"
+      <PrimaryButton onClick={start} disabled={busy || !full || staked < members.length}>
+        {!full
+          ? `Waiting for members (${members.length}/${pool.maxMembers})`
           : staked < members.length
             ? `Waiting for stakes (${staked}/${members.length})`
             : busy
               ? "Confirm in wallet…"
-              : `Start with ${members.length} members`}
+              : "Start pool"}
       </PrimaryButton>
     );
   } else if (myMember?.isKicked) {
