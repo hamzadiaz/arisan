@@ -1,7 +1,8 @@
 import { test, expect } from "@playwright/test";
 
 // The webServer runs with CUSTODIAL_SIGNING_ENABLED and CRON_SECRET blank (playwright.config.ts).
-// The cron route has an in-memory 6 req/min/IP limiter, so the cron tests stay under that.
+// The cron route has an in-memory 6 req/min/IP limiter (7th request -> 429). These tests make 4
+// cron requests; with CI's retries: 1 a retry adds at most 2. Do not add more cron requests here.
 
 test.describe("11-12. Custodial endpoints are gone", () => {
   for (const endpoint of ["/api/custodial/create-wallet", "/api/custodial/sign-transaction"]) {

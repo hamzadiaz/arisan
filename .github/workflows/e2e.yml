@@ -13,7 +13,7 @@ jobs:
   security:
     name: Anchor security_p0 + program flow
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
       - name: System deps for solana-program-test

@@ -21,7 +21,7 @@ npm run test:e2e        # both
 | # | Requirement | Test | Proof |
 |---|---|---|---|
 | 1 | Home welcome: "Save together", Connect wallet, Have an invite code | `ui.spec.ts` › 1. Home welcome | `ui/01-home-welcome.png` |
-| 2 | Bottom nav Home / Create / Join, three distinct routes | › 2. Bottom nav (URL, header title, active state per tab) | `ui/02-bottom-nav.png` |
+| 2 | Bottom nav Home / Create / Join, three distinct routes | › 2. Bottom nav (URL, header title, active state per tab) | `ui/02-nav-create.png`, `ui/02-nav-join.png`, `ui/02-nav-home.png` |
 | 3 | Theme toggle dark → light (html class + background) | › 3. Theme toggle (seeded dark → light, persisted across reload; plus system-dark → light in one tap) | `ui/03a-theme-dark.png`, `ui/03b-theme-light.png` |
 | 4 | Wallet connect sheet opens | › 4. Wallet connect sheet (body CTA and header chip; closes) | `ui/04a-wallet-sheet.png`, `ui/04b-…` |
 | 5 | Join: invite input, Paste, Find pool | › 5. Join (normalisation, 8-char gate, clipboard Paste, not-found message, found pool → "Connect wallet to join" → sheet) | `ui/05a-join-not-found.png`, `ui/05b-join-found.png` |

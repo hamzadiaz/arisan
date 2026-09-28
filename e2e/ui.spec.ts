@@ -50,9 +50,9 @@ test.describe("2. Bottom nav", () => {
         );
       }
       seen.add(new URL(page.url()).pathname);
+      await proof(page, `02-nav-${tab.label.toLowerCase()}`);
     }
     expect([...seen].sort()).toEqual(["/", "/join", "/pools/create"]);
-    await proof(page, "02-bottom-nav");
   });
 });
 
