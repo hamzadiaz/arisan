@@ -37,7 +37,7 @@ async function expectSigned(page: Page, button: string, instruction: RegExp) {
 test.describe("Pending pool", () => {
   test("a visitor is sent to Join with an invite code", async ({ page }) => {
     await openPool(page, { members: [{ wallet: other, stakeDeposited: true }] });
-    await expect(main(page).getByRole("link", { name: "Join with invite code" })).toHaveAttribute(
+    await expect(main(page).getByRole("link", { name: "Join with code" })).toHaveAttribute(
       "href",
       "/join"
     );
@@ -77,7 +77,7 @@ test.describe("Active pool", () => {
 
   test("a staked member pays the round", async ({ page }) => {
     await openPool(page, active([{ wallet: me, stakeDeposited: true }, { wallet: other, stakeDeposited: true }]));
-    await expect(main(page).getByText("0 of 2 paid this round")).toBeVisible();
+    await expect(main(page).getByText("0/2 paid this round")).toBeVisible();
     await proof(page, "p-pay");
     await expectSigned(page, "Pay 0.5 SOL", /^make_?[pP]ayment$/);
   });
@@ -88,7 +88,7 @@ test.describe("Active pool", () => {
       active([{ wallet: me, stakeDeposited: true }, { wallet: other, stakeDeposited: true }], [me])
     );
     await expect(main(page).getByRole("button", { name: "Paid for round 1" })).toBeDisabled();
-    await expect(main(page).getByText("1 of 2 paid this round")).toBeVisible();
+    await expect(main(page).getByText("1/2 paid this round")).toBeVisible();
   });
 
   test("a slashed member in grace is offered a restake, not a failing Pay (E2E-11)", async ({

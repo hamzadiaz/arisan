@@ -33,7 +33,7 @@ test.describe("Create pool transaction", () => {
     // Math.floor(4.1 * 1e9) is 4099999999: one lamport short (E2E-8)
     await page.getByPlaceholder("0.5").fill("4.1");
     await page.getByRole("button", { name: "More members" }).click(); // 6
-    await page.getByRole("button", { name: "2× round" }).click();
+    await page.getByRole("button", { name: "2×", exact: true }).click();
 
     await page.getByRole("button", { name: "Create pool" }).click();
     await expect(page.getByText("Transaction Failed")).toBeVisible();
