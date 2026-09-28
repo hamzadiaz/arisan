@@ -85,6 +85,20 @@ pub fn handler(ctx: Context<LeavePool>) -> Result<()> {
         msg!("Stake refunded: {} lamports to {}", member.stake_amount, ctx.accounts.user.key());
     }
 
+    let wallet = ctx.accounts.user.key();
+    let len = pool.roster_len as usize;
+    let idx = pool.member_wallets[..len]
+        .iter()
+        .position(|entry| *entry == wallet)
+        .ok_or(ArisanError::NotMember)?;
+    let last = len
+        .checked_sub(1)
+        .ok_or(ArisanError::Overflow)?;
+    pool.member_wallets[idx] = pool.member_wallets[last];
+    pool.member_wallets[last] = Pubkey::default();
+    pool.roster_len = pool.roster_len.checked_sub(1)
+        .ok_or(ArisanError::Overflow)?;
+
     // Decrement member count
     pool.member_count = pool.member_count.checked_sub(1)
         .ok_or(ArisanError::Overflow)?;

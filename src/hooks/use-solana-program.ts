@@ -7,8 +7,15 @@ import { PublicKey, Transaction, VersionedTransaction } from "@solana/web3.js";
 import {
   createProvider,
   getProgram,
+  getMemberPDA,
   PROGRAM_ID,
 } from "@/lib/solana/program";
+import {
+  SLOT_HASHES_SYSVAR,
+  isDrawEligible,
+  readSlotHash,
+  selectDerivedWinner,
+} from "@/lib/solana/bound-draw";
 import { useWalletMode } from "@/hooks/use-wallet-mode";
 import {
   buildCreatePoolTransaction,
@@ -17,6 +24,7 @@ import {
   buildStartPoolTransaction,
   buildLeavePoolTransaction,
   buildMakePaymentTransaction,
+  buildCommitDrawTransaction,
   buildExecuteDrawTransaction,
   buildClaimWinningsTransaction,
   buildClaimStakeRefundTransaction,
@@ -117,6 +125,7 @@ export function useSolanaPoolActions() {
       try {
         let signature: string;
         let logs: string[] | undefined;
+        let returnData: string | undefined;
 
         if (isCustodial) {
           // Use custodial API for signing
@@ -158,6 +167,7 @@ export function useSolanaPoolActions() {
               maxSupportedTransactionVersion: 0,
             });
             logs = txDetails?.meta?.logMessages || undefined;
+            returnData = txDetails?.meta?.returnData?.data?.[0];
           } catch (logErr) {
             console.warn("Failed to fetch transaction logs:", logErr);
           }
@@ -168,6 +178,7 @@ export function useSolanaPoolActions() {
           signature,
           explorerLink: getExplorerLink(signature, "devnet"),
           logs,
+          returnData,
         };
       } catch (err: any) {
         console.error("Transaction failed:", err);
@@ -201,18 +212,10 @@ export function useSolanaPoolActions() {
         const result = await sendTransactionHelper(transaction, "create_pool", true);
 
         if (result.success) {
-          // Parse logs to extract invite code
-          // The contract logs: "Invite code: XXXXXXXX"
-          let inviteCode: string | undefined;
-          if (result.logs) {
-            for (const log of result.logs) {
-              const match = log.match(/Invite code:\s*([A-Z0-9]+)/i);
-              if (match) {
-                inviteCode = match[1];
-                break;
-              }
-            }
-          }
+          // Plaintext invite code is transaction return data, not a program log.
+          const inviteCode = result.returnData
+            ? Buffer.from(result.returnData, "base64").toString("utf8")
+            : undefined;
 
           return {
             ...result,
@@ -437,7 +440,7 @@ export function useSolanaPoolActions() {
     [program, walletAddress, sendTransactionHelper]
   );
 
-  // Execute draw (authority only)
+  // Commit the draw slot, then pay the member derived from that slot hash.
   const executeDraw = useCallback(
     async (params: ExecuteDrawParams): Promise<TransactionResult> => {
       if (!program || !walletAddress) {
@@ -448,12 +451,65 @@ export function useSolanaPoolActions() {
       setError(null);
 
       try {
-        const transaction = await buildExecuteDrawTransaction(
-          program,
-          walletAddress,
-          params
-        );
+        const accounts = program.account as any;
+        let poolAccount = await accounts.pool.fetch(params.poolAddress);
+        if (poolAccount.randomnessRound !== params.round) {
+          const commitTx = await buildCommitDrawTransaction(
+            program,
+            walletAddress,
+            params.poolAddress
+          );
+          const committed = await sendTransactionHelper(commitTx, "commit_draw_randomness");
+          if (!committed.success) {
+            setError(committed.error || "Failed to commit draw randomness");
+            return committed;
+          }
+          poolAccount = await accounts.pool.fetch(params.poolAddress);
+        }
 
+        const committedSlot = BigInt(poolAccount.randomnessSlot.toString());
+        const started = Date.now();
+        let hash: Uint8Array | null = null;
+        while (Date.now() - started < 30_000) {
+          const info = await connection.getAccountInfo(SLOT_HASHES_SYSVAR);
+          hash = info ? readSlotHash(info.data, committedSlot) : null;
+          if (hash) break;
+          await new Promise((resolve) => setTimeout(resolve, 500));
+        }
+        if (!hash) {
+          return { success: false, error: "Draw randomness is not ready yet" };
+        }
+
+        const roster = (poolAccount.memberWallets as PublicKey[]).slice(
+          0,
+          poolAccount.rosterLen as number
+        );
+        const memberAccounts: PublicKey[] = [];
+        const eligible: PublicKey[] = [];
+        for (const wallet of roster) {
+          if (wallet.equals(PublicKey.default)) continue;
+          const [memberPDA] = getMemberPDA(params.poolAddress, wallet);
+          memberAccounts.push(memberPDA);
+          const member = await accounts.member.fetch(memberPDA);
+          if (
+            isDrawEligible({
+              wallet,
+              hasWon: member.hasWon,
+              inDefault: member.inDefault,
+              isKicked: member.isKicked,
+              inGracePeriod: member.inGracePeriod,
+            })
+          ) {
+            eligible.push(wallet);
+          }
+        }
+
+        const transaction = await buildExecuteDrawTransaction(program, walletAddress, {
+          poolAddress: params.poolAddress,
+          round: params.round,
+          derivedWinner: selectDerivedWinner(hash, eligible),
+          memberAccounts,
+        });
         const result = await sendTransactionHelper(transaction, "execute_draw");
         if (!result.success) {
           setError(result.error || "Failed to execute draw");
@@ -467,7 +523,7 @@ export function useSolanaPoolActions() {
         setIsLoading(false);
       }
     },
-    [program, walletAddress, sendTransactionHelper]
+    [program, walletAddress, sendTransactionHelper, connection]
   );
 
   // Claim winnings

@@ -1,7 +1,6 @@
 "use client";
 
 import { useWallet, useConnection } from "@solana/wallet-adapter-react";
-import { useAuth } from "@/components/providers/auth-provider";
 import { useState, useCallback, useMemo } from "react";
 import { Transaction, PublicKey, Connection } from "@solana/web3.js";
 
@@ -17,30 +16,23 @@ interface TransactionResult {
 export function useWalletMode() {
   const { connection } = useConnection();
   const { connected, publicKey, signTransaction, sendTransaction } = useWallet();
-  const { user, userProfile, firebaseUser } = useAuth();
   const [isLoading, setIsLoading] = useState(false);
 
-  // Determine wallet mode
+  // CLOCK IN is self-custodial. A server-held key is never the active signer.
   const mode: WalletMode = useMemo(() => {
     if (connected && publicKey) {
       return "web3";
     }
-    if (user && userProfile?.custodialWallet) {
-      return "custodial";
-    }
     return "none";
-  }, [connected, publicKey, user, userProfile?.custodialWallet]);
+  }, [connected, publicKey]);
 
   // Get the active wallet address
   const walletAddress = useMemo(() => {
     if (mode === "web3" && publicKey) {
       return publicKey.toBase58();
     }
-    if (mode === "custodial" && userProfile?.custodialWallet) {
-      return userProfile.custodialWallet;
-    }
     return null;
-  }, [mode, publicKey, userProfile?.custodialWallet]);
+  }, [mode, publicKey]);
 
   // Get PublicKey object for the active wallet
   const walletPublicKey = useMemo(() => {
@@ -56,7 +48,7 @@ export function useWalletMode() {
   const sendWalletTransaction = useCallback(
     async (
       transaction: Transaction,
-      action: string
+      _action: string
     ): Promise<TransactionResult> => {
       if (mode === "none") {
         return { success: false, error: "No wallet available" };
@@ -90,53 +82,9 @@ export function useWalletMode() {
             signature,
             explorerLink: `https://explorer.solana.com/tx/${signature}?cluster=${network}`,
           };
-        } else if (mode === "custodial") {
-          // Custodial mode: Backend signs on behalf of user
-          if (!firebaseUser || !walletPublicKey) {
-            return { success: false, error: "Not authenticated" };
-          }
-
-          const idToken = await firebaseUser.getIdToken();
-
-          // Set blockhash and fee payer before serializing
-          const { blockhash } = await connection.getLatestBlockhash();
-          transaction.recentBlockhash = blockhash;
-          transaction.feePayer = walletPublicKey;
-
-          // Serialize transaction for API
-          const transactionBase64 = transaction
-            .serialize({ requireAllSignatures: false })
-            .toString("base64");
-
-          const response = await fetch("/api/custodial/sign-transaction", {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              Authorization: `Bearer ${idToken}`,
-            },
-            body: JSON.stringify({
-              transactionBase64,
-              action,
-            }),
-          });
-
-          const result = await response.json();
-
-          if (!response.ok) {
-            return {
-              success: false,
-              error: result.error || "Transaction failed",
-            };
-          }
-
-          return {
-            success: true,
-            signature: result.signature,
-            explorerLink: result.explorerLink,
-          };
         }
 
-        return { success: false, error: "Unknown wallet mode" };
+        return { success: false, error: "Connect a self-custodial wallet to sign" };
       } catch (error: unknown) {
         const message = error instanceof Error ? error.message : "Transaction failed";
         return { success: false, error: message };
@@ -144,7 +92,7 @@ export function useWalletMode() {
         setIsLoading(false);
       }
     },
-    [mode, connection, signTransaction, sendTransaction, publicKey, walletPublicKey, firebaseUser]
+    [mode, connection, signTransaction, sendTransaction, publicKey]
   );
 
   // Helper to build and send transaction in one call

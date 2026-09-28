@@ -1,0 +1,537 @@
+//! P0: the draw caller cannot choose the winner, and a paid member cannot be slashed.
+
+use anchor_lang::{AccountDeserialize, InstructionData, ToAccountMetas};
+use arisan_contracts::draw_randomness::{read_slot_hash, select_winner};
+use arisan_contracts::state::{Draw, Member, Pool};
+use solana_program_test::*;
+use solana_sdk::{
+    account::Account,
+    account_info::AccountInfo,
+    clock::Clock,
+    entrypoint::ProgramResult,
+    instruction::{AccountMeta, Instruction},
+    pubkey::Pubkey,
+    signature::{Keypair, Signer},
+    system_program,
+    sysvar::slot_hashes,
+    transaction::Transaction,
+};
+
+const CONTRIB: u64 = 10_000_000;
+
+struct PoolFixture {
+    pool: Pubkey,
+    vault: Pubkey,
+    invite: String,
+}
+
+/// `arisan_contracts::entry` ties the account slice lifetime to `AccountInfo`.
+/// ProgramTest's builtin fn pointer keeps those lifetimes independent.
+fn entry_compat<'a, 'b, 'c, 'd>(
+    program_id: &'a Pubkey,
+    accounts: &'b [AccountInfo<'c>],
+    data: &'d [u8],
+) -> ProgramResult {
+    let accounts: &'b [AccountInfo<'b>] = unsafe { std::mem::transmute(accounts) };
+    arisan_contracts::entry(program_id, accounts, data)
+}
+
+fn program_test() -> ProgramTest {
+    let mut test = ProgramTest::new(
+        "arisan_contracts",
+        arisan_contracts::ID,
+        processor!(entry_compat),
+    );
+    test.prefer_bpf(false);
+    test
+}
+
+fn pda(seeds: &[&[u8]]) -> Pubkey {
+    Pubkey::find_program_address(seeds, &arisan_contracts::ID).0
+}
+
+async fn send(
+    context: &mut ProgramTestContext,
+    instructions: &[Instruction],
+    extra: &[&Keypair],
+) -> BanksTransactionResultWithMetadata {
+    let blockhash = context.banks_client.get_latest_blockhash().await.unwrap();
+    let mut signers: Vec<&Keypair> = vec![&context.payer];
+    signers.extend_from_slice(extra);
+    let tx = Transaction::new_signed_with_payer(
+        instructions,
+        Some(&context.payer.pubkey()),
+        &signers,
+        blockhash,
+    );
+    context
+        .banks_client
+        .process_transaction_with_metadata(tx)
+        .await
+        .unwrap()
+}
+
+fn logs(result: &BanksTransactionResultWithMetadata) -> String {
+    result
+        .metadata
+        .as_ref()
+        .map(|meta| meta.log_messages.join("\n"))
+        .unwrap_or_default()
+}
+
+fn assert_ok(result: &BanksTransactionResultWithMetadata, label: &str) {
+    if result.result.is_err() {
+        panic!("{label} failed: {:?}\n{}", result.result, logs(result));
+    }
+}
+
+fn assert_logs_contain(result: &BanksTransactionResultWithMetadata, needle: &str) {
+    let text = logs(result);
+    assert!(
+        result.result.is_err(),
+        "expected {needle} to fail the transaction\n{text}"
+    );
+    assert!(
+        text.contains(needle),
+        "logs missing {needle}: {:?}\n{text}",
+        result.result
+    );
+}
+
+async fn account_data(context: &mut ProgramTestContext, key: Pubkey) -> Vec<u8> {
+    context
+        .banks_client
+        .get_account(key)
+        .await
+        .unwrap()
+        .unwrap_or_else(|| panic!("missing account {key}"))
+        .data
+}
+
+async fn lamports(context: &mut ProgramTestContext, key: Pubkey) -> u64 {
+    context
+        .banks_client
+        .get_account(key)
+        .await
+        .unwrap()
+        .map(|account| account.lamports)
+        .unwrap_or(0)
+}
+
+fn load_pool(data: &[u8]) -> Pool {
+    let mut slice = data;
+    Pool::try_deserialize(&mut slice).unwrap()
+}
+
+fn load_member(data: &[u8]) -> Member {
+    let mut slice = data;
+    Member::try_deserialize(&mut slice).unwrap()
+}
+
+fn load_draw(data: &[u8]) -> Draw {
+    let mut slice = data;
+    Draw::try_deserialize(&mut slice).unwrap()
+}
+
+async fn create_pool(
+    context: &mut ProgramTestContext,
+    max_members: u8,
+    stake_enabled: bool,
+) -> PoolFixture {
+    let authority = context.payer.pubkey();
+    let creator = pda(&[b"creator", authority.as_ref()]);
+    let pool = pda(&[b"pool", authority.as_ref(), &0u64.to_le_bytes()]);
+    let vault = pda(&[b"vault", pool.as_ref()]);
+    let ix = Instruction {
+        program_id: arisan_contracts::ID,
+        accounts: arisan_contracts::accounts::CreatePool {
+            authority,
+            creator_stats: creator,
+            pool,
+            vault,
+            system_program: system_program::id(),
+        }
+        .to_account_metas(None),
+        data: arisan_contracts::instruction::CreatePool {
+            name: "Security".into(),
+            max_members,
+            contribution_amount: CONTRIB,
+            currency: 0,
+            stake_multiplier: 1,
+            stake_enabled,
+            auto_mode: false,
+        }
+        .data(),
+    };
+    let result = send(context, &[ix], &[]).await;
+    assert_ok(&result, "create_pool");
+    let invite_bytes = result
+        .metadata
+        .as_ref()
+        .and_then(|meta| meta.return_data.as_ref())
+        .map(|data| data.data.clone())
+        .expect("create_pool return data");
+    let invite = String::from_utf8(invite_bytes).unwrap();
+    assert_eq!(invite.len(), 8, "invite code is 8 chars");
+    for line in result.metadata.unwrap().log_messages {
+        if line.starts_with("Program log:") {
+            assert!(
+                !line.contains(&invite),
+                "invite plaintext leaked into program log: {line}"
+            );
+        }
+    }
+    PoolFixture { pool, vault, invite }
+}
+
+async fn join(context: &mut ProgramTestContext, fixture: &PoolFixture, user: &Keypair) {
+    let member = pda(&[b"member", fixture.pool.as_ref(), user.pubkey().as_ref()]);
+    let ix = Instruction {
+        program_id: arisan_contracts::ID,
+        accounts: arisan_contracts::accounts::JoinPool {
+            user: user.pubkey(),
+            pool: fixture.pool,
+            member,
+            vault: fixture.vault,
+            system_program: system_program::id(),
+        }
+        .to_account_metas(None),
+        data: arisan_contracts::instruction::JoinPool {
+            invite_code: fixture.invite.clone(),
+        }
+        .data(),
+    };
+    let result = if user.pubkey() == context.payer.pubkey() {
+        send(context, &[ix], &[]).await
+    } else {
+        send(context, &[ix], &[user]).await
+    };
+    assert_ok(&result, "join_pool");
+}
+
+async fn deposit_stake(context: &mut ProgramTestContext, fixture: &PoolFixture, user: &Keypair) {
+    let member = pda(&[b"member", fixture.pool.as_ref(), user.pubkey().as_ref()]);
+    let ix = Instruction {
+        program_id: arisan_contracts::ID,
+        accounts: arisan_contracts::accounts::DepositStake {
+            user: user.pubkey(),
+            pool: fixture.pool,
+            member,
+            vault: fixture.vault,
+            system_program: system_program::id(),
+        }
+        .to_account_metas(None),
+        data: arisan_contracts::instruction::DepositStake {}.data(),
+    };
+    let result = if user.pubkey() == context.payer.pubkey() {
+        send(context, &[ix], &[]).await
+    } else {
+        send(context, &[ix], &[user]).await
+    };
+    assert_ok(&result, "deposit_stake");
+}
+
+async fn start_pool(context: &mut ProgramTestContext, fixture: &PoolFixture) {
+    let ix = Instruction {
+        program_id: arisan_contracts::ID,
+        accounts: arisan_contracts::accounts::StartPool {
+            authority: context.payer.pubkey(),
+            pool: fixture.pool,
+        }
+        .to_account_metas(None),
+        data: arisan_contracts::instruction::StartPool {}.data(),
+    };
+    assert_ok(&send(context, &[ix], &[]).await, "start_pool");
+}
+
+async fn pay(context: &mut ProgramTestContext, fixture: &PoolFixture, user: &Keypair, round: u8) {
+    let member = pda(&[b"member", fixture.pool.as_ref(), user.pubkey().as_ref()]);
+    let payment = pda(&[
+        b"payment",
+        fixture.pool.as_ref(),
+        user.pubkey().as_ref(),
+        &[round],
+    ]);
+    let ix = Instruction {
+        program_id: arisan_contracts::ID,
+        accounts: arisan_contracts::accounts::MakePayment {
+            user: user.pubkey(),
+            pool: fixture.pool,
+            member,
+            payment,
+            vault: fixture.vault,
+            system_program: system_program::id(),
+        }
+        .to_account_metas(None),
+        data: arisan_contracts::instruction::MakePayment {}.data(),
+    };
+    let result = if user.pubkey() == context.payer.pubkey() {
+        send(context, &[ix], &[]).await
+    } else {
+        send(context, &[ix], &[user]).await
+    };
+    assert_ok(&result, "make_payment");
+}
+
+fn execute_ix(
+    fixture: &PoolFixture,
+    caller: Pubkey,
+    winner_wallet: Pubkey,
+    round: u8,
+    member_pdas: &[Pubkey],
+) -> Instruction {
+    let draw = pda(&[b"draw", fixture.pool.as_ref(), &[round]]);
+    let mut accounts = arisan_contracts::accounts::ExecuteDraw {
+        authority: caller,
+        pool: fixture.pool,
+        winner_wallet,
+        draw,
+        vault: fixture.vault,
+        system_program: system_program::id(),
+        slot_hashes: slot_hashes::id(),
+    }
+    .to_account_metas(None);
+    for member in member_pdas {
+        accounts.push(AccountMeta::new(*member, false));
+    }
+    Instruction {
+        program_id: arisan_contracts::ID,
+        accounts,
+        data: arisan_contracts::instruction::ExecuteDraw {}.data(),
+    }
+}
+
+fn mark_ix(fixture: &PoolFixture, caller: Pubkey, member_wallet: Pubkey, round: u8) -> Instruction {
+    let member = pda(&[b"member", fixture.pool.as_ref(), member_wallet.as_ref()]);
+    let payment = pda(&[
+        b"payment",
+        fixture.pool.as_ref(),
+        member_wallet.as_ref(),
+        &[round],
+    ]);
+    Instruction {
+        program_id: arisan_contracts::ID,
+        accounts: arisan_contracts::accounts::MarkDefaulter {
+            caller,
+            pool: fixture.pool,
+            member,
+            payment,
+            vault: fixture.vault,
+            system_program: system_program::id(),
+        }
+        .to_account_metas(None),
+        data: arisan_contracts::instruction::MarkDefaulter {}.data(),
+    }
+}
+
+async fn commit(context: &mut ProgramTestContext, fixture: &PoolFixture) -> u64 {
+    let ix = Instruction {
+        program_id: arisan_contracts::ID,
+        accounts: arisan_contracts::accounts::CommitDrawRandomness {
+            caller: context.payer.pubkey(),
+            pool: fixture.pool,
+        }
+        .to_account_metas(None),
+        data: arisan_contracts::instruction::CommitDrawRandomness {}.data(),
+    };
+    assert_ok(&send(context, &[ix], &[]).await, "commit_draw_randomness");
+    let pool = load_pool(&account_data(context, fixture.pool).await);
+    pool.randomness_slot
+}
+
+#[tokio::test]
+async fn malicious_caller_cannot_choose_winner_and_vault_pays_derived_member() {
+    let member2 = Keypair::new();
+    let mut test = program_test();
+    test.add_account(
+        member2.pubkey(),
+        Account::new(2_000_000_000, 0, &system_program::id()),
+    );
+    let mut context = test.start_with_context().await;
+
+    let fixture = create_pool(&mut context, 2, false).await;
+    let payer = context.payer.insecure_clone();
+    join(&mut context, &fixture, &payer).await;
+    join(&mut context, &fixture, &member2).await;
+    start_pool(&mut context, &fixture).await;
+    pay(&mut context, &fixture, &payer, 1).await;
+    pay(&mut context, &fixture, &member2, 1).await;
+
+    context.warp_to_slot(20).unwrap();
+    let committed_slot = commit(&mut context, &fixture).await;
+    context.warp_to_slot(committed_slot + 3).unwrap();
+
+    let slot_hash_account = account_data(&mut context, slot_hashes::id()).await;
+    let hash = read_slot_hash(&slot_hash_account, committed_slot)
+        .expect("committed slot hash is in SlotHashes");
+    let mut eligible = [context.payer.pubkey(), member2.pubkey()];
+    let derived = select_winner(&hash, &mut eligible).unwrap();
+    let attacker_choice = if derived == member2.pubkey() {
+        context.payer.pubkey()
+    } else {
+        member2.pubkey()
+    };
+
+    let member_pdas = [
+        pda(&[b"member", fixture.pool.as_ref(), context.payer.pubkey().as_ref()]),
+        pda(&[b"member", fixture.pool.as_ref(), member2.pubkey().as_ref()]),
+    ];
+    // Reverse the roster order. Selection must ignore account order.
+    let reversed = [member_pdas[1], member_pdas[0]];
+
+    let vault_before = lamports(&mut context, fixture.vault).await;
+    let wrong = execute_ix(
+        &fixture,
+        context.payer.pubkey(),
+        attacker_choice,
+        1,
+        &reversed,
+    );
+    let rejected = send(&mut context, &[wrong], &[]).await;
+    assert_logs_contain(
+        &rejected,
+        "Winner is not the member derived from on-chain randomness",
+    );
+    assert_eq!(
+        lamports(&mut context, fixture.vault).await,
+        vault_before,
+        "rejected draw must not move the pot"
+    );
+
+    let winner_before = lamports(&mut context, derived).await;
+    let right = execute_ix(&fixture, context.payer.pubkey(), derived, 1, &member_pdas);
+    assert_ok(&send(&mut context, &[right], &[]).await, "execute_draw");
+
+    let expected = CONTRIB * 2;
+    let vault_after = lamports(&mut context, fixture.vault).await;
+    assert_eq!(vault_before - vault_after, expected, "vault pays contribution * member_count");
+
+    let winner_after = lamports(&mut context, derived).await;
+    if derived != context.payer.pubkey() {
+        assert_eq!(winner_after - winner_before, expected);
+    }
+
+    let draw = load_draw(&account_data(&mut context, pda(&[b"draw", fixture.pool.as_ref(), &[1]])).await);
+    assert_eq!(draw.winner, derived);
+    assert_eq!(draw.amount, expected);
+    assert!(draw.claimed);
+
+    let winner_member = load_member(
+        &account_data(
+            &mut context,
+            pda(&[b"member", fixture.pool.as_ref(), derived.as_ref()]),
+        )
+        .await,
+    );
+    assert!(winner_member.has_won);
+    assert_eq!(winner_member.won_round, 1);
+
+    let loser = if derived == member2.pubkey() {
+        context.payer.pubkey()
+    } else {
+        member2.pubkey()
+    };
+    let loser_member = load_member(
+        &account_data(
+            &mut context,
+            pda(&[b"member", fixture.pool.as_ref(), loser.as_ref()]),
+        )
+        .await,
+    );
+    assert!(!loser_member.has_won);
+}
+
+#[tokio::test]
+async fn paid_member_cannot_be_defaulted_and_unpaid_only_after_deadline() {
+    let member2 = Keypair::new();
+    let mut test = program_test();
+    test.add_account(
+        member2.pubkey(),
+        Account::new(2_000_000_000, 0, &system_program::id()),
+    );
+    let mut context = test.start_with_context().await;
+
+    let fixture = create_pool(&mut context, 2, true).await;
+    let payer_copy = context.payer.insecure_clone();
+    join(&mut context, &fixture, &payer_copy).await;
+    join(&mut context, &fixture, &member2).await;
+    deposit_stake(&mut context, &fixture, &payer_copy).await;
+    deposit_stake(&mut context, &fixture, &member2).await;
+    start_pool(&mut context, &fixture).await;
+    // Authority pays. member2 does not.
+    pay(&mut context, &fixture, &payer_copy, 1).await;
+
+    let caller = context.payer.pubkey();
+    let paid_ix = mark_ix(&fixture, caller, caller, 1);
+    assert_logs_contain(
+        &send(&mut context, &[paid_ix], &[]).await,
+        "Member has already paid this round",
+    );
+    let paid = load_member(
+        &account_data(
+            &mut context,
+            pda(&[b"member", fixture.pool.as_ref(), caller.as_ref()]),
+        )
+        .await,
+    );
+    assert!(paid.stake_deposited);
+    assert_eq!(paid.stake_amount, CONTRIB);
+    assert!(!paid.in_default);
+    assert!(!paid.in_grace_period);
+
+    let unpaid_ix = mark_ix(&fixture, caller, member2.pubkey(), 1);
+    assert_logs_contain(
+        &send(&mut context, &[unpaid_ix], &[]).await,
+        "Round payment window is still open",
+    );
+    let unpaid = load_member(
+        &account_data(
+            &mut context,
+            pda(&[b"member", fixture.pool.as_ref(), member2.pubkey().as_ref()]),
+        )
+        .await,
+    );
+    assert!(unpaid.stake_deposited);
+    assert!(!unpaid.in_default);
+    assert!(!unpaid.in_grace_period);
+
+    let pool = load_pool(&account_data(&mut context, fixture.pool).await);
+    let mut clock: Clock = context.banks_client.get_sysvar().await.unwrap();
+    // A new blockhash is required; the unpaid retry is otherwise the same transaction.
+    context.warp_to_slot(clock.slot + 2).unwrap();
+    clock = context.banks_client.get_sysvar().await.unwrap();
+    clock.unix_timestamp = pool.next_draw_timestamp + 5;
+    context.set_sysvar(&clock);
+
+    let paid_again = mark_ix(&fixture, caller, caller, 1);
+    assert_logs_contain(
+        &send(&mut context, &[paid_again], &[]).await,
+        "Member has already paid this round",
+    );
+    let paid = load_member(
+        &account_data(
+            &mut context,
+            pda(&[b"member", fixture.pool.as_ref(), caller.as_ref()]),
+        )
+        .await,
+    );
+    assert!(paid.stake_deposited);
+    assert!(!paid.in_default);
+
+    let unpaid_after = mark_ix(&fixture, caller, member2.pubkey(), 1);
+    assert_ok(
+        &send(&mut context, &[unpaid_after], &[]).await,
+        "mark unpaid after deadline",
+    );
+    let unpaid = load_member(
+        &account_data(
+            &mut context,
+            pda(&[b"member", fixture.pool.as_ref(), member2.pubkey().as_ref()]),
+        )
+        .await,
+    );
+    assert!(!unpaid.stake_deposited, "unpaid stake is slashed");
+    assert_eq!(unpaid.stake_amount, 0);
+    assert!(unpaid.in_default);
+    assert!(unpaid.in_grace_period);
+}

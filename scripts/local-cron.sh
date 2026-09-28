@@ -2,7 +2,7 @@
 # Local cron simulator for auto-draw scheduler
 # Runs every 60 seconds and triggers /api/cron/draw
 
-CRON_SECRET="arisan-local-dev-secret-2024"
+: "${CRON_SECRET:?Set CRON_SECRET}"
 API_URL="http://localhost:3000/api/cron/draw"
 
 echo "========================================"

@@ -122,6 +122,12 @@ pub fn handler(
         member.payments_made = 0;
     }
 
+    let roster_idx = pool.roster_len as usize;
+    require!(roster_idx < pool.member_wallets.len(), ArisanError::PoolFull);
+    pool.member_wallets[roster_idx] = ctx.accounts.user.key();
+    pool.roster_len = pool.roster_len.checked_add(1)
+        .ok_or(ArisanError::Overflow)?;
+
     // Increment pool member count
     pool.member_count = pool.member_count.checked_add(1)
         .ok_or(ArisanError::Overflow)?;

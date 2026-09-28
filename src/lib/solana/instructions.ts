@@ -5,6 +5,7 @@ import {
   TransactionInstruction,
   Transaction,
 } from "@solana/web3.js";
+import { SLOT_HASHES_SYSVAR } from "./bound-draw";
 import {
   getCreatorStatsPDA,
   getPoolPDA,
@@ -258,7 +259,26 @@ export async function buildMakePaymentTransaction(
 export interface ExecuteDrawParams {
   poolAddress: PublicKey;
   round: number;
-  winnerWallet: PublicKey; // The selected winner's wallet address
+  /** Wallet derived from the committed slot hash. The program rejects any other. */
+  derivedWinner: PublicKey;
+  /** Every roster member PDA. Order does not select the winner. */
+  memberAccounts: PublicKey[];
+}
+
+export async function buildCommitDrawTransaction(
+  program: Program,
+  caller: PublicKey,
+  poolAddress: PublicKey
+): Promise<Transaction> {
+  const ix = await program.methods
+    .commitDrawRandomness()
+    .accounts({
+      caller,
+      pool: poolAddress,
+    })
+    .instruction();
+
+  return new Transaction().add(ix);
 }
 
 export async function buildExecuteDrawTransaction(
@@ -267,7 +287,6 @@ export async function buildExecuteDrawTransaction(
   params: ExecuteDrawParams
 ): Promise<Transaction> {
   const [drawPDA] = getDrawPDA(params.poolAddress, params.round);
-  const [winnerMemberPDA] = getMemberPDA(params.poolAddress, params.winnerWallet);
   const [vaultPDA] = getVaultPDA(params.poolAddress);
 
   const ix = await program.methods
@@ -275,12 +294,19 @@ export async function buildExecuteDrawTransaction(
     .accounts({
       authority,
       pool: params.poolAddress,
-      winnerMember: winnerMemberPDA,
-      winnerWallet: params.winnerWallet,
+      winnerWallet: params.derivedWinner,
       draw: drawPDA,
       vault: vaultPDA,
       systemProgram: SystemProgram.programId,
+      slotHashes: SLOT_HASHES_SYSVAR,
     })
+    .remainingAccounts(
+      params.memberAccounts.map((pubkey) => ({
+        pubkey,
+        isWritable: true,
+        isSigner: false,
+      }))
+    )
     .instruction();
 
   return new Transaction().add(ix);
@@ -368,6 +394,9 @@ export interface TransactionResult {
   signature?: string;
   explorerLink?: string;
   error?: string;
+  logs?: string[];
+  /** Base64 return data from the transaction, when requested. */
+  returnData?: string;
 }
 
 // ============ Mark Defaulter ============
@@ -375,7 +404,7 @@ export interface TransactionResult {
 export interface MarkDefaulterParams {
   poolAddress: PublicKey;
   memberWallet: PublicKey;
-  hasPaid: boolean; // Whether the member has paid for current round
+  round: number;
 }
 
 export async function buildMarkDefaulterTransaction(
@@ -384,14 +413,16 @@ export async function buildMarkDefaulterTransaction(
   params: MarkDefaulterParams
 ): Promise<Transaction> {
   const [memberPDA] = getMemberPDA(params.poolAddress, params.memberWallet);
+  const [paymentPDA] = getPaymentPDA(params.poolAddress, params.memberWallet, params.round);
   const [vaultPDA] = getVaultPDA(params.poolAddress);
 
   const ix = await program.methods
-    .markDefaulter(params.hasPaid)
+    .markDefaulter()
     .accounts({
       caller,
       pool: params.poolAddress,
       member: memberPDA,
+      payment: paymentPDA,
       vault: vaultPDA,
       systemProgram: SystemProgram.programId,
     })

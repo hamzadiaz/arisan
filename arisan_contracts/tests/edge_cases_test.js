@@ -203,11 +203,12 @@ async function main() {
   // Try to mark as defaulter (has_paid=false means they didn't pay)
   try {
     await program.methods
-      .markDefaulter(false) // has_paid = false
+      .markDefaulter()
       .accounts({
         caller: authority.publicKey,
         pool: poolPDA,
         member: defaulterMemberPDA,
+        payment: derivePaymentPDA(poolPDA, defaulter.publicKey, 1)[0],
         vault: vaultPDA,
         systemProgram: SystemProgram.programId,
       })
@@ -275,11 +276,12 @@ async function main() {
 
   try {
     await program.methods
-      .markDefaulter(false) // has_paid = false
+      .markDefaulter()
       .accounts({
         caller: authority.publicKey,
         pool: poolPDA,
         member: defaulterMemberPDA,
+        payment: derivePaymentPDA(poolPDA, defaulter.publicKey, 1)[0],
         vault: vaultPDA,
         systemProgram: SystemProgram.programId,
       })

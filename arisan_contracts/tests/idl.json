@@ -505,6 +505,31 @@
       "args": []
     },
     {
+      "name": "commit_draw_randomness",
+      "discriminator": [
+        243,
+        181,
+        133,
+        115,
+        207,
+        170,
+        141,
+        154
+      ],
+      "accounts": [
+        {
+          "name": "caller",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "pool",
+          "writable": true
+        }
+      ],
+      "args": []
+    },
+    {
       "name": "execute_draw",
       "discriminator": [
         88,
@@ -525,33 +550,6 @@
         {
           "name": "pool",
           "writable": true
-        },
-        {
-          "name": "winner_member",
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  109,
-                  101,
-                  109,
-                  98,
-                  101,
-                  114
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "pool"
-              },
-              {
-                "kind": "account",
-                "path": "winner_wallet"
-              }
-            ]
-          }
         },
         {
           "name": "winner_wallet",
@@ -608,6 +606,10 @@
         {
           "name": "system_program",
           "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "slot_hashes",
+          "address": "SysvarS1otHashes111111111111111111111111111"
         }
       ],
       "args": []
@@ -924,6 +926,39 @@
           }
         },
         {
+          "name": "payment",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  97,
+                  121,
+                  109,
+                  101,
+                  110,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "pool"
+              },
+              {
+                "kind": "account",
+                "path": "member.wallet",
+                "account": "Member"
+              },
+              {
+                "kind": "account",
+                "path": "pool.current_round",
+                "account": "Pool"
+              }
+            ]
+          }
+        },
+        {
           "name": "vault",
           "writable": true,
           "pda": {
@@ -950,12 +985,7 @@
           "address": "11111111111111111111111111111111"
         }
       ],
-      "args": [
-        {
-          "name": "has_paid",
-          "type": "bool"
-        }
-      ]
+      "args": []
     },
     {
       "name": "rejoin_pool",
@@ -1370,6 +1400,46 @@
       "code": 6026,
       "name": "StakeNotEnabled",
       "msg": "Stake not enabled for this pool"
+    },
+    {
+      "name": "WinnerMismatch",
+      "msg": "Winner is not the member derived from on-chain randomness"
+    },
+    {
+      "name": "InvalidMemberSet",
+      "msg": "Member set does not match the pool roster"
+    },
+    {
+      "name": "NoEligibleMembers",
+      "msg": "No eligible members for this draw"
+    },
+    {
+      "name": "RandomnessNotCommitted",
+      "msg": "Draw randomness has not been committed for this round"
+    },
+    {
+      "name": "RandomnessNotReady",
+      "msg": "Draw randomness is not ready yet"
+    },
+    {
+      "name": "RandomnessExpired",
+      "msg": "Committed slot hash expired before the draw was revealed"
+    },
+    {
+      "name": "RandomnessAlreadyCommitted",
+      "msg": "Draw randomness is already committed for this round"
+    },
+    {
+      "name": "MemberAlreadyPaid",
+      "msg": "Member has already paid this round"
+    },
+    {
+      "name": "RoundNotDue",
+      "msg": "Round payment window is still open"
+    },
+    {
+      "name": "InvalidPaymentAccount",
+      "msg": "Payment account does not match this member and round"
     }
   ],
   "types": [
@@ -1469,11 +1539,11 @@
             "type": "i64"
           },
           {
-            "name": "invite_code",
+            "name": "invite_code_hash",
             "type": {
               "array": [
                 "u8",
-                8
+                32
               ]
             }
           },
@@ -1512,6 +1582,27 @@
           {
             "name": "auto_mode",
             "type": "bool"
+          },
+          {
+            "name": "member_wallets",
+            "type": {
+              "array": [
+                "pubkey",
+                20
+              ]
+            }
+          },
+          {
+            "name": "roster_len",
+            "type": "u8"
+          },
+          {
+            "name": "randomness_slot",
+            "type": "u64"
+          },
+          {
+            "name": "randomness_round",
+            "type": "u8"
           }
         ]
       }
@@ -1711,8 +1802,8 @@
             }
           },
           {
-            "name": "invite_code",
-            "type": "string"
+            "name": "stake_enabled",
+            "type": "bool"
           },
           {
             "name": "auto_mode",

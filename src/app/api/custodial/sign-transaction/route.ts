@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { Connection, Transaction } from "@solana/web3.js";
-import { getCustodialKeypair } from "@/lib/custodial/wallet-service";
+import { custodialSigningEnabled, getCustodialKeypair } from "@/lib/custodial/wallet-service";
 import { verifyFirebaseToken } from "@/lib/firebase-admin";
 import { withRateLimit } from "@/lib/rate-limit";
 import { signTransactionSchema, validateInput } from "@/lib/validations";
@@ -10,6 +10,13 @@ const connection = new Connection(
 );
 
 export async function POST(request: NextRequest) {
+  if (!custodialSigningEnabled()) {
+    return NextResponse.json(
+      { error: "Custodial signing is disabled. CLOCK IN uses a self-custodial wallet." },
+      { status: 410 }
+    );
+  }
+
   try {
     // Rate limiting (strict for transaction signing)
     const rateLimitResponse = await withRateLimit(request, "strict");

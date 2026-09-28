@@ -2,6 +2,17 @@ import { Keypair } from "@solana/web3.js";
 import { getAdminDb } from "@/lib/firebase-admin";
 import crypto from "crypto";
 
+/** CLOCK IN is self-custodial. Key loading stays off unless this is exactly "true". */
+export function custodialSigningEnabled(): boolean {
+  return process.env.CUSTODIAL_SIGNING_ENABLED === "true";
+}
+
+function assertCustodialEnabled(): void {
+  if (!custodialSigningEnabled()) {
+    throw new Error("Custodial signing is disabled");
+  }
+}
+
 // Get encryption key from environment
 function getEncryptionKey(): Buffer {
   const key = process.env.CUSTODIAL_ENCRYPTION_KEY;
@@ -48,6 +59,7 @@ function decrypt(encryptedData: string): Uint8Array {
 
 // Create a new custodial wallet for a user
 export async function createCustodialWallet(userId: string): Promise<string> {
+  assertCustodialEnabled();
   const db = getAdminDb();
   const walletRef = db.collection("custodial_wallets").doc(userId);
 
@@ -88,6 +100,7 @@ export async function getCustodialWalletAddress(userId: string): Promise<string 
 
 // Get the full keypair for signing transactions (server-side only!)
 export async function getCustodialKeypair(userId: string): Promise<Keypair> {
+  assertCustodialEnabled();
   const db = getAdminDb();
   const walletRef = db.collection("custodial_wallets").doc(userId);
   const doc = await walletRef.get();

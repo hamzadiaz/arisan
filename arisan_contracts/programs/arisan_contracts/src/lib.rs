@@ -1,5 +1,6 @@
 use anchor_lang::prelude::*;
 
+pub mod draw_randomness;
 pub mod errors;
 pub mod instructions;
 pub mod state;
@@ -116,16 +117,24 @@ pub mod arisan_contracts {
         instructions::make_payment::handler(ctx)
     }
 
+    /// Commit the slot that will select this round's winner.
+    ///
+    /// The slot hash does not exist yet when this lands, so the caller cannot
+    /// aim the commit at a chosen member. `execute_draw` reads that hash later.
+    pub fn commit_draw_randomness(ctx: Context<CommitDrawRandomness>) -> Result<()> {
+        instructions::execute_draw::commit_handler(ctx)
+    }
+
     /// Execute draw to select round winner and AUTO-PAY them
     ///
-    /// Uses randomness to select a winner from eligible members.
-    /// Winner is paid automatically - no separate claim needed.
-    /// (Devnet: pseudo-random, Mainnet: Switchboard VRF)
+    /// The winner is derived from the committed slot hash and the eligible
+    /// roster. The caller supplies accounts, not a choice of winner.
     ///
     /// # Requirements
     /// - Pool must be Active
-    /// - Caller must be pool authority OR anyone after deadline (Clockwork)
-    /// - Winner must be eligible (member who hasn't won)
+    /// - Randomness committed for this round, and the slot hash available
+    /// - Caller must be pool authority OR anyone after deadline
+    /// - Payout wallet must be the derived eligible member
     pub fn execute_draw(ctx: Context<ExecuteDraw>) -> Result<()> {
         instructions::execute_draw::handler(ctx)
     }
@@ -175,14 +184,15 @@ pub mod arisan_contracts {
     /// - Sets 48h grace period to recover
     /// If already in grace period and past deadline: kicks member
     ///
-    /// # Arguments
-    /// * `has_paid` - Whether the member has paid (caller must check off-chain)
+    /// Payment status is read from the member's Payment PDA for this round.
+    /// A paid member cannot be slashed, graced, or kicked from this path.
+    /// An unpaid member can be marked only after the round deadline.
     ///
     /// # Requirements
     /// - Pool must be Active
     /// - Anyone can call (permissionless for automation)
-    pub fn mark_defaulter(ctx: Context<MarkDefaulter>, has_paid: bool) -> Result<()> {
-        instructions::mark_defaulters::handler(ctx, has_paid)
+    pub fn mark_defaulter(ctx: Context<MarkDefaulter>) -> Result<()> {
+        instructions::mark_defaulters::handler(ctx)
     }
 
     /// Rejoin pool after being kicked
