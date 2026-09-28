@@ -7,7 +7,9 @@ import { useWalletModal } from "@solana/wallet-adapter-react-ui";
 import { Check, Copy, Minus, Plus, Share2 } from "lucide-react";
 import { toast } from "sonner";
 import { AppShell, PrimaryButton, SecondaryButton, Section } from "@/components/mobile/app-shell";
+import { Art } from "@/components/mobile/art";
 import { useSolanaPoolActions } from "@/hooks/use-solana-program";
+import { ASSETS } from "@/lib/assets";
 import { clampUtf8, formatAmount, sanitizeAmountInput } from "@/lib/format";
 import { poolToasts, txErrorToast, dismissToast } from "@/lib/solana/transaction-toast";
 import { cn } from "@/lib/utils";
@@ -76,6 +78,7 @@ function CreateForm({ onCreated }: { onCreated: (c: Created) => void }) {
 
   return (
     <div>
+      <Art src={ASSETS.createPool} className="mx-auto mb-2 size-24" />
       <Section title="Name">
         <input
           value={name}

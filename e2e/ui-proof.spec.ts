@@ -11,6 +11,7 @@ import {
   gotoReady,
   installMockWallet,
   mockRpcWithPool,
+  walletSheet,
 } from "./helpers";
 
 // Screenshot capture for docs/ui-proof. Skipped in the normal gate; run with
@@ -229,6 +230,24 @@ const shot = (page: Page, theme: string, name: string) =>
   page.screenshot({ path: path.join(OUT, `${theme}-${name}.png`) });
 
 for (const theme of ["dark", "light"] as const) {
+  test.describe(`ui-proof ${theme} walkthrough`, () => {
+    test.use({ storageState: { cookies: [], origins: [] } });
+
+    test("first-visit walkthrough", async ({ page }) => {
+      await setTheme(page, theme);
+      await page.goto("/");
+      const walkthrough = page.getByTestId("walkthrough");
+      for (const [i, title] of ["Form a circle", "Everyone pays in", "One takes the pot", "Your keys"].entries()) {
+        await expect(walkthrough.getByRole("heading", { name: title })).toBeVisible();
+        await page.waitForLoadState("networkidle").catch(() => {});
+        await page.waitForTimeout(400);
+        await shot(page, theme, `00-walkthrough-${i + 1}`);
+        await walkthrough.getByRole("button", { name: i === 3 ? "Get started" : "Next" }).click();
+      }
+      await expect(walkthrough).toBeHidden();
+    });
+  });
+
   test.describe(`ui-proof ${theme}`, () => {
     test("disconnected screens", async ({ page }) => {
       await setTheme(page, theme);
@@ -258,6 +277,7 @@ for (const theme of ["dark", "light"] as const) {
       await gotoReady(page, "/");
       await connectMockWallet(page);
       await expect(page.getByText("Family circle").first()).toBeVisible({ timeout: 15_000 });
+      await expect(walletSheet(page)).toHaveCount(0);
       await shot(page, theme, "02-home");
 
       const family = accounts.find((a) => a.kind === "Pool")!.pubkey.toBase58();
