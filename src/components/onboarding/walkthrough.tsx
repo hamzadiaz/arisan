@@ -100,9 +100,15 @@ export function Walkthrough() {
                 <motion.div
                   key={index}
                   custom={direction}
-                  initial={{ opacity: 0, x: direction * shift }}
-                  animate={{ opacity: 1, x: 0 }}
-                  exit={{ opacity: 0, x: direction * -shift }}
+                  variants={{
+                    enter: (d: number) => ({ opacity: 0, x: d * shift }),
+                    center: { opacity: 1, x: 0 },
+                    // Exiting screens read the latest direction from AnimatePresence's custom.
+                    exit: (d: number) => ({ opacity: 0, x: d * -shift }),
+                  }}
+                  initial="enter"
+                  animate="center"
+                  exit="exit"
                   transition={{ duration: 0.28, ease: [0.22, 1, 0.36, 1] }}
                   className="flex flex-col items-center"
                 >

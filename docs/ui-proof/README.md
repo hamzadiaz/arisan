@@ -4,11 +4,14 @@
 
 | # | Screen |
 |---|--------|
+| 00-1…4 | First-visit walkthrough: circle, pay in, pot, keys |
 | 01 | Welcome (disconnected) |
 | 02 | Home: next draw + pools |
 | 03 / 03b | Active pool: pay, winners, members paid/due |
 | 04 | Create |
 | 05 | Join: code lookup |
+
+`asset-montage.png`: the generated brand art in `public/assets/generated/`.
 
 Regenerate:
 
