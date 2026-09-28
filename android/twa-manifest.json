@@ -1,0 +1,13 @@
+{
+  "fallbackType": "webview",
+  "generatorApp": "solana-mobile",
+  "host": "localhost:3000",
+  "launcherName": "Arisan",
+  "name": "Arisan",
+  "packageId": "com.arisan.clockin",
+  "startUrl": "/",
+  "signingKey": {
+    "alias": "arisan",
+    "path": "~/.config/arisan/arisan-clockin-release.jks"
+  }
+}
