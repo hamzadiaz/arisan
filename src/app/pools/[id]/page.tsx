@@ -192,7 +192,11 @@ export default function PoolPage({ params }: { params: Promise<{ id: string }> }
     );
 
   const busy = actions.isLoading;
-  const needsStake = pool.stakeEnabled !== false && myMember && !myMember.stakeDeposited;
+  const stakePool = pool.stakeEnabled !== false;
+  const needsStake = stakePool && myMember && !myMember.stakeDeposited;
+  // start_pool does not check stakes on-chain; an unstaked member of a started pool can
+  // neither stake nor pay. Only offer Start once everyone has staked.
+  const staked = stakePool ? members.filter((m) => m.stakeDeposited).length : members.length;
 
   let primary: React.ReactNode = null;
   if (!connected) {
@@ -221,10 +225,27 @@ export default function PoolPage({ params }: { params: Promise<{ id: string }> }
     );
   } else if (isAuthority && pool.status === "pending") {
     primary = (
-      <PrimaryButton onClick={start} disabled={busy || members.length < 2}>
-        {members.length < 2 ? "Waiting for members" : busy ? "Confirm in wallet…" : `Start with ${members.length} members`}
+      <PrimaryButton onClick={start} disabled={busy || members.length < 2 || staked < members.length}>
+        {members.length < 2
+          ? "Waiting for members"
+          : staked < members.length
+            ? `Waiting for stakes (${staked}/${members.length})`
+            : busy
+              ? "Confirm in wallet…"
+              : `Start with ${members.length} members`}
       </PrimaryButton>
     );
+  } else if (myMember?.isKicked) {
+    primary = <PrimaryButton disabled>You were removed from this pool</PrimaryButton>;
+  } else if (myMember && pool.status === "active" && needsStake && myMember.inGracePeriod) {
+    // Slashed for a missed round: the program requires a fresh stake before paying again
+    primary = (
+      <PrimaryButton onClick={stake} disabled={busy}>
+        {busy ? "Confirm in wallet…" : "Restake to stay in"}
+      </PrimaryButton>
+    );
+  } else if (myMember && pool.status === "active" && needsStake) {
+    primary = <PrimaryButton disabled>No stake deposited · payments are blocked</PrimaryButton>;
   } else if (myMember && pool.status === "active") {
     primary = paidThisRound.has(me!) ? (
       <PrimaryButton disabled>
