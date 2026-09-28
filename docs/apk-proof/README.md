@@ -17,7 +17,7 @@ Run on 2026-09-29. Nothing below is mocked: a signed release APK, the MWA `fakew
 |---|---|---|
 | Launch | `01-launch-home.png` | The app loads inside the shell; the header shows brand, theme toggle and Connect |
 | Connect | `02-wallet-sheet.png` | The sheet lists **Mobile Wallet Adapter · Detected** |
-| MWA authorize | `03-fakewallet-authorize.png` | fakewallet shows "Authorize dapp: Arisan, localhost:3107", verification successful |
+| MWA authorize | `03-fakewallet-authorize.png` | fakewallet shows "Authorize dapp: Arisan, localhost:3107", verification successful. This shot is from the first connect, while the app still targeted devnet, so it reads `Cluster: devnet`; the localnet re-authorization showed `solana:localnet` |
 | Connected | `04-connected-home.png` | The header shows the wallet chip; Home shows "Pools · No pools yet" |
 | Create | `05-create-form.png` | "APK local test", 0.01 SOL, 2 members, no stake |
 | Sign | `06-fakewallet-sign.png` | fakewallet signs 1 payload and sends it to the cluster |
@@ -41,6 +41,8 @@ plaintext in account: false
 - The E2E gate built into `.next` and clobbered a running build. It now builds into `.next-e2e`.
 
 ## Not proven here
+- **First-visit walkthrough (#16):** it merged after this run. The APK was rebuilt with the new icons, but the walkthrough (swipe exit, first-visit flag in `localStorage`) has only been exercised in desktop Chromium by the E2E gate, not inside the WebView.
+- **Funding note:** the fakewallet account was funded with 0.5 **devnet** SOL from `~/.config/solana/id.json` (6.29 → 5.79). The emulator ran read-only, so that seed is gone and the devnet SOL can't be recovered. It has no value, but it was spent.
 - **Devnet:** not proven. One create attempt against devnet did not land, most likely from the same blockhash expiry (the sign screen was left open too long). Separately, the devnet program is the pre-security build: it has no `commit_draw_randomness`, so draws can't run, and its Pool layout predates the app's IDL. It needs a redeploy (see `docs/APK.md`).
 - **Real device / Seed Vault:** tested on an emulator with `fakewallet`, not on a Seeker with Seed Vault.
 - **Hosted https URL:** the APK here points at `http://localhost:3107` via `adb reverse`. A distributable APK needs a hosted https deployment; see the production checklist in `docs/APK.md`.
