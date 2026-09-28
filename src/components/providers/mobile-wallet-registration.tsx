@@ -29,7 +29,7 @@ export function MobileWalletRegistration() {
     const identity = {
       name: "Arisan",
       uri: window.location.origin,
-      icon: "/arisan-icon.png",
+      icon: "/icons/icon-192.png",
     };
 
     registerMwa({

@@ -4,6 +4,7 @@ import { ThemeProvider } from "@/components/providers/theme-provider";
 import { SolanaProvider } from "@/components/providers/solana-provider";
 import { MobileWalletRegistration } from "@/components/providers/mobile-wallet-registration";
 import { Toaster } from "@/components/ui/sonner";
+import { Walkthrough } from "@/components/onboarding/walkthrough";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -71,6 +72,7 @@ export default function RootLayout({
           <SolanaProvider>
             {children}
             <Toaster position="top-center" />
+            <Walkthrough />
           </SolanaProvider>
         </ThemeProvider>
       </body>
