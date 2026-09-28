@@ -38,8 +38,8 @@ export function AppShell({ title, back, children }: AppShellProps) {
 
   return (
     <div className="mx-auto flex min-h-dvh w-full max-w-[480px] flex-col bg-background">
-      <header className="sticky top-0 z-40 border-b border-border/60 bg-background/85 pt-[env(safe-area-inset-top)] backdrop-blur-xl">
-        <div className="flex h-14 items-center gap-2 px-4">
+      <header className="sticky top-0 z-40 border-b border-border/60 bg-background/90 pt-[env(safe-area-inset-top)] backdrop-blur-xl">
+        <div className="flex h-14 items-center gap-1 px-4">
           {back ? (
             <button
               onClick={() => (inAppScreens > 1 ? router.back() : router.push("/"))}
@@ -49,12 +49,12 @@ export function AppShell({ title, back, children }: AppShellProps) {
               <ChevronLeft className="size-6" />
             </button>
           ) : (
-            <Link href="/" className="flex items-center gap-2">
+            <Link href="/" className="-ml-1 mr-1.5 flex shrink-0 items-center" aria-label="Arisan home">
               {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src="/arisan-icon.svg" alt="" className="size-8 rounded-lg" />
+              <img src="/arisan-icon.svg" alt="" className="size-7 rounded-lg" />
             </Link>
           )}
-          <h1 className="flex-1 truncate text-lg font-semibold tracking-tight">
+          <h1 className="flex-1 truncate text-[17px] font-semibold tracking-tight">
             {title ?? "Arisan"}
           </h1>
           <ThemeToggle />
@@ -62,7 +62,7 @@ export function AppShell({ title, back, children }: AppShellProps) {
         </div>
       </header>
 
-      <main className="flex-1 px-4 pb-[calc(6rem+env(safe-area-inset-bottom))] pt-4">
+      <main className="flex-1 px-4 pb-[calc(5rem+env(safe-area-inset-bottom))] pt-4">
         {children}
       </main>
 
@@ -75,11 +75,11 @@ export function AppShell({ title, back, children }: AppShellProps) {
                 <Link
                   href={href}
                   className={cn(
-                    "flex h-16 flex-col items-center justify-center gap-1 text-xs font-medium transition-colors",
+                    "flex h-14 flex-col items-center justify-center gap-0.5 text-[11px] font-medium transition-colors",
                     active ? "text-primary" : "text-muted-foreground"
                   )}
                 >
-                  <Icon className={cn("size-6", active && "stroke-[2.5]")} />
+                  <Icon className={cn("size-[22px]", active && "stroke-[2.25]")} />
                   {label}
                 </Link>
               </li>
@@ -101,11 +101,11 @@ export function Section({
   children: React.ReactNode;
 }) {
   return (
-    <section className="mb-6">
+    <section className="mb-5">
       {(title || action) && (
-        <div className="mb-2 flex items-center justify-between px-1">
+        <div className="mb-1.5 flex items-center justify-between px-1">
           {title && (
-            <h2 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+            <h2 className="text-[13px] font-medium text-muted-foreground">
               {title}
             </h2>
           )}
@@ -119,7 +119,7 @@ export function Section({
 
 export function Panel({ className, children }: { className?: string; children: React.ReactNode }) {
   return (
-    <div className={cn("rounded-2xl border border-border bg-card p-4", className)}>{children}</div>
+    <div className={cn("rounded-xl border border-border bg-card p-4", className)}>{children}</div>
   );
 }
 
@@ -131,7 +131,7 @@ export function PrimaryButton({
     <button
       {...props}
       className={cn(
-        "flex h-14 w-full items-center justify-center gap-2 rounded-2xl bg-primary text-base font-semibold text-primary-foreground shadow-lg shadow-primary/20 transition-transform active:scale-[0.98] disabled:opacity-50 disabled:shadow-none",
+        "flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-primary text-[15px] font-semibold text-primary-foreground transition-opacity active:opacity-80 disabled:opacity-40",
         className
       )}
     />
@@ -146,7 +146,7 @@ export function SecondaryButton({
     <button
       {...props}
       className={cn(
-        "flex h-14 w-full items-center justify-center gap-2 rounded-2xl border border-border bg-card text-base font-semibold transition-transform active:scale-[0.98] disabled:opacity-50",
+        "flex h-12 w-full items-center justify-center gap-2 rounded-xl border border-border bg-card text-[15px] font-semibold transition-opacity active:opacity-80 disabled:opacity-40",
         className
       )}
     />
@@ -171,11 +171,27 @@ export function StatusPill({ status }: { status: string }) {
   return (
     <span
       className={cn(
-        "inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold",
+        "inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold",
         STATUS_STYLES[status] ?? STATUS_STYLES.completed
       )}
     >
       {STATUS_LABELS[status] ?? status}
     </span>
+  );
+}
+
+export function RoundBar({ round, total }: { round: number; total: number }) {
+  return (
+    <div className="mt-3 flex items-center gap-3">
+      <div className="h-1 flex-1 overflow-hidden rounded-full bg-muted">
+        <div
+          className="h-full rounded-full bg-primary"
+          style={{ width: `${total ? Math.min(100, (round / total) * 100) : 0}%` }}
+        />
+      </div>
+      <span className="text-xs text-muted-foreground tabular-nums">
+        {round}/{total}
+      </span>
+    </div>
   );
 }

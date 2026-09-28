@@ -5,8 +5,7 @@ import { useRouter } from "next/navigation";
 import { PublicKey } from "@solana/web3.js";
 import { useWallet } from "@solana/wallet-adapter-react";
 import { useWalletModal } from "@solana/wallet-adapter-react-ui";
-import { ClipboardPaste, Search } from "lucide-react";
-import { AppShell, Panel, PrimaryButton, Section, StatusPill } from "@/components/mobile/app-shell";
+import { AppShell, Panel, PrimaryButton, StatusPill } from "@/components/mobile/app-shell";
 import { useSolanaPoolActions, useSolanaPoolData } from "@/hooks/use-solana-program";
 import type { FetchedPool } from "@/lib/solana/accounts";
 import { formatAmount } from "@/lib/format";
@@ -78,75 +77,70 @@ export default function JoinPage() {
 
   return (
     <AppShell title="Join a pool" back>
-      <Section title="Invite code">
-        <div className="flex h-16 items-center gap-2 rounded-2xl border border-border bg-card pl-4 pr-2 focus-within:border-primary">
-          <input
-            value={code}
-            onChange={(e) => updateCode(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && code.length === CODE_LENGTH && find()}
-            placeholder="ABCD1234"
-            autoCapitalize="characters"
-            autoComplete="off"
-            spellCheck={false}
-            className="w-full bg-transparent font-mono text-2xl font-bold tracking-[0.25em] uppercase outline-none placeholder:text-muted-foreground/40"
-          />
-          <button
-            onClick={paste}
-            className="flex h-11 shrink-0 items-center gap-1.5 rounded-xl bg-muted px-3 text-sm font-semibold active:scale-95"
-          >
-            <ClipboardPaste className="size-4" />
-            Paste
-          </button>
-        </div>
-        {notFound && (
-          <p className="mt-2 px-1 text-sm text-destructive">No pool matches that code. Check it and try again.</p>
-        )}
-        {lookupFailed && (
-          <p role="alert" className="mt-2 px-1 text-sm text-destructive">
-            Can&apos;t reach Solana right now. Check your connection and try again.
-          </p>
-        )}
-      </Section>
+      <div className="mb-3 flex h-14 items-center gap-2 rounded-xl border border-border bg-card pl-4 pr-1.5 focus-within:border-primary">
+        <input
+          value={code}
+          onChange={(e) => updateCode(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && code.length === CODE_LENGTH && find()}
+          placeholder="ABCD1234"
+          aria-label="Invite code"
+          autoCapitalize="characters"
+          autoComplete="off"
+          spellCheck={false}
+          className="w-full bg-transparent font-mono text-xl font-semibold tracking-[0.2em] uppercase outline-none placeholder:text-muted-foreground/40"
+        />
+        <button
+          onClick={paste}
+          className="h-10 shrink-0 rounded-lg px-3 text-sm font-medium text-primary active:bg-muted"
+        >
+          Paste
+        </button>
+      </div>
+      {notFound && <p className="-mt-1 mb-3 px-1 text-sm text-destructive">No pool with that code.</p>}
+      {lookupFailed && (
+        <p role="alert" className="-mt-1 mb-3 px-1 text-sm text-destructive">
+          Can&apos;t reach Solana. Try again.
+        </p>
+      )}
 
       {!pool && (
         <PrimaryButton onClick={find} disabled={code.length !== CODE_LENGTH || searching}>
-          <Search className="size-5" />
           {searching ? "Looking up…" : "Find pool"}
         </PrimaryButton>
       )}
 
       {pool && (
         <>
-          <Panel className="mb-6">
+          <Panel className="mb-3">
             <div className="flex items-center justify-between gap-2">
-              <p className="truncate text-xl font-bold">{pool.name}</p>
+              <p className="truncate font-semibold">{pool.name}</p>
               <StatusPill status={pool.status} />
             </div>
-            <p className="mt-4 text-sm text-muted-foreground">You pay each round</p>
-            <p className="text-4xl font-bold tracking-tight">
+            <p className="mt-3 text-3xl font-semibold tracking-tight tabular-nums">
               {formatAmount(pool.monthlyAmount, pool.currency)}
             </p>
-            <dl className="mt-4 grid grid-cols-3 gap-3 border-t border-border pt-4 text-sm">
+            <p className="text-[13px] text-muted-foreground">per round</p>
+            <dl className="mt-4 grid grid-cols-3 gap-3 border-t border-border pt-3 text-sm">
               <div>
-                <dt className="text-muted-foreground">Members</dt>
-                <dd className="font-semibold">{pool.maxMembers}</dd>
+                <dt className="text-[13px] text-muted-foreground">Members</dt>
+                <dd className="font-medium tabular-nums">{pool.maxMembers}</dd>
               </div>
               <div>
-                <dt className="text-muted-foreground">Pot</dt>
-                <dd className="font-semibold">
+                <dt className="text-[13px] text-muted-foreground">Pot</dt>
+                <dd className="font-medium tabular-nums">
                   {formatAmount(pool.monthlyAmount * pool.maxMembers, pool.currency)}
                 </dd>
               </div>
               <div>
-                <dt className="text-muted-foreground">Stake</dt>
-                <dd className="font-semibold">{pool.stakeEnabled ? "Required" : "None"}</dd>
+                <dt className="text-[13px] text-muted-foreground">Stake</dt>
+                <dd className="font-medium">{pool.stakeEnabled ? "Required" : "None"}</dd>
               </div>
             </dl>
           </Panel>
 
           <PrimaryButton onClick={join} disabled={joining || pool.status !== "pending"}>
             {pool.status !== "pending"
-              ? "This pool has already started"
+              ? "Already started"
               : !connected
                 ? "Connect wallet to join"
                 : joining

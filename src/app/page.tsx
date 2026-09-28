@@ -3,8 +3,8 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useWallet } from "@solana/wallet-adapter-react";
-import { ChevronRight, Plus, ShieldCheck, Ticket, Users, Repeat, Trophy } from "lucide-react";
-import { AppShell, Panel, Section, StatusPill } from "@/components/mobile/app-shell";
+import { ChevronRight } from "lucide-react";
+import { AppShell, RoundBar, Section, StatusPill } from "@/components/mobile/app-shell";
 import { ConnectWalletButton } from "@/components/mobile/wallet-button";
 import { useSolanaPoolData } from "@/hooks/use-solana-program";
 import type { FetchedPool } from "@/lib/solana/accounts";
@@ -22,52 +22,18 @@ export default function HomePage() {
 
 function Welcome() {
   return (
-    <div className="flex flex-col gap-6 pt-4">
-      <div className="space-y-3">
-        <h2 className="text-[2rem] font-bold leading-tight tracking-tight">
-          Save together.
-          <br />
-          <span className="text-primary">Take turns.</span>
-        </h2>
-        <p className="text-base text-muted-foreground">
-          A savings circle with friends on Solana. Everyone pays in each round; one member
-          takes the pot.
-        </p>
+    <div className="flex min-h-[calc(100dvh-12rem)] flex-col justify-end gap-3 pb-2">
+      <div className="mb-auto pt-16">
+        <h2 className="text-2xl font-semibold tracking-tight">Savings circles on Solana</h2>
+        <p className="mt-1 text-[15px] text-muted-foreground">Pay in each round. Take the pot once.</p>
       </div>
-
-      <Panel className="space-y-4">
-        {[
-          { icon: Users, title: "Start a circle", body: "2–20 people, paid in SOL" },
-          { icon: Repeat, title: "Pay each round", body: "Same amount, straight from your wallet" },
-          { icon: Trophy, title: "One member takes the pot", body: "Everyone wins exactly once" },
-        ].map(({ icon: Icon, title, body }) => (
-          <div key={title} className="flex items-center gap-3">
-            <span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-primary/15 text-primary">
-              <Icon className="size-5" />
-            </span>
-            <div>
-              <p className="font-semibold leading-tight">{title}</p>
-              <p className="text-sm text-muted-foreground">{body}</p>
-            </div>
-          </div>
-        ))}
-      </Panel>
-
-      <div className="space-y-3">
-        <ConnectWalletButton />
-        <Link
-          href="/join"
-          className="flex h-12 w-full items-center justify-center gap-2 rounded-2xl text-sm font-semibold text-primary active:bg-muted"
-        >
-          <Ticket className="size-4" />
-          Have an invite code?
-        </Link>
-      </div>
-
-      <p className="flex items-center justify-center gap-1.5 text-xs text-muted-foreground">
-        <ShieldCheck className="size-4" />
-        Your keys, your wallet · Seed Vault, Phantom, Solflare
-      </p>
+      <ConnectWalletButton />
+      <Link
+        href="/join"
+        className="flex h-11 w-full items-center justify-center text-sm font-medium text-muted-foreground active:text-foreground"
+      >
+        Join with code
+      </Link>
     </div>
   );
 }
@@ -109,90 +75,61 @@ function MyPools() {
   return (
     <div>
       {nextDue && (
-        <Link href={`/pools/${nextDue.id}`} className="block">
-          <div className="mb-6 rounded-3xl bg-gradient-to-br from-emerald-500 to-emerald-700 p-5 text-white shadow-xl shadow-emerald-900/20">
-            <p className="text-sm font-medium text-emerald-100">Next draw · {nextDue.name}</p>
-            <p className="mt-1 text-4xl font-bold tracking-tight">
-              {formatAmount(nextDue.monthlyAmount, nextDue.currency)}
-            </p>
-            <div className="mt-4 flex items-center justify-between text-sm">
-              <span className="rounded-full bg-white/20 px-3 py-1 font-medium">
-                Round {nextDue.currentRound} of {nextDue.durationMonths}
-              </span>
-              <span className="font-medium">
-                {timeUntil(nextDue.nextDrawDate) ? `In ${timeUntil(nextDue.nextDrawDate)}` : "Due now"}
-              </span>
-            </div>
+        <Link
+          href={`/pools/${nextDue.id}`}
+          className="mb-5 block rounded-xl border border-border bg-card p-4 active:opacity-80"
+        >
+          <div className="flex items-center justify-between text-[13px] text-muted-foreground">
+            <span className="truncate">Next draw · {nextDue.name}</span>
+            <span className="shrink-0 font-medium text-primary">
+              {timeUntil(nextDue.nextDrawDate) ? `in ${timeUntil(nextDue.nextDrawDate)}` : "Due now"}
+            </span>
           </div>
+          <p className="mt-1 text-3xl font-semibold tracking-tight tabular-nums">
+            {formatAmount(nextDue.monthlyAmount, nextDue.currency)}
+          </p>
+          <RoundBar round={nextDue.currentRound} total={nextDue.durationMonths} />
         </Link>
       )}
 
-      <div className="mb-6 grid grid-cols-2 gap-3">
-        <Link
-          href="/pools/create"
-          className="flex h-24 flex-col items-start justify-between rounded-2xl bg-primary p-4 font-semibold text-primary-foreground active:scale-[0.98] transition-transform"
-        >
-          <Plus className="size-6" />
-          Create pool
-        </Link>
-        <Link
-          href="/join"
-          className="flex h-24 flex-col items-start justify-between rounded-2xl border border-border bg-card p-4 font-semibold active:scale-[0.98] transition-transform"
-        >
-          <Ticket className="size-6 text-primary" />
-          Join with code
-        </Link>
-      </div>
-
-      <Section title="My pools">
+      <Section title="Pools">
         {pools === null && loadFailed ? (
-          <Panel className="py-8 text-center">
-            <p className="font-semibold">Can&apos;t reach Solana</p>
-            <p className="mt-1 text-sm text-muted-foreground">
-              Your pools couldn&apos;t be loaded. Check your connection.
-            </p>
+          <div className="flex items-center justify-between rounded-xl border border-border bg-card px-4 py-3">
+            <p className="text-sm">Can&apos;t reach Solana</p>
             <button
               onClick={() => {
                 setLoadFailed(false);
                 setAttempt((n) => n + 1);
               }}
-              className="mt-4 inline-flex h-11 items-center rounded-xl bg-muted px-4 text-sm font-semibold active:scale-95"
+              className="h-9 rounded-lg px-3 text-sm font-medium text-primary active:bg-muted"
             >
               Try again
             </button>
-          </Panel>
+          </div>
         ) : pools === null ? (
-          <div className="space-y-3">
+          <div className="space-y-2">
             {[0, 1].map((i) => (
-              <div key={i} className="h-20 animate-pulse rounded-2xl bg-muted" />
+              <div key={i} className="h-16 animate-pulse rounded-xl bg-muted" />
             ))}
           </div>
         ) : pools.length === 0 ? (
-          <Panel className="py-8 text-center">
-            <p className="font-semibold">No pools yet</p>
-            <p className="mt-1 text-sm text-muted-foreground">
-              Create one and share the code, or join with a code from a friend.
-            </p>
-          </Panel>
+          <p className="px-1 py-6 text-sm text-muted-foreground">No pools yet</p>
         ) : (
-          <ul className="space-y-3">
+          <ul className="divide-y divide-border overflow-hidden rounded-xl border border-border bg-card">
             {pools.map((pool) => (
               <li key={pool.id}>
                 <Link
                   href={`/pools/${pool.id}`}
-                  className="flex items-center gap-3 rounded-2xl border border-border bg-card p-4 active:scale-[0.99] transition-transform"
+                  className="flex items-center gap-3 px-4 py-3 active:bg-muted"
                 >
                   <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2">
-                      <p className="truncate font-semibold">{pool.name}</p>
-                      <StatusPill status={pool.status} />
-                    </div>
-                    <p className="mt-0.5 text-sm text-muted-foreground">
-                      {formatAmount(pool.monthlyAmount, pool.currency)} / round ·{" "}
-                      {pool.maxMembers} members
+                    <p className="truncate font-medium">{pool.name}</p>
+                    <p className="text-[13px] text-muted-foreground tabular-nums">
+                      {formatAmount(pool.monthlyAmount, pool.currency)} · {pool.maxMembers} members
                     </p>
                   </div>
-                  <ChevronRight className="size-5 text-muted-foreground" />
+                  <StatusPill status={pool.status} />
+                  <ChevronRight className="size-4 text-muted-foreground" />
                 </Link>
               </li>
             ))}
