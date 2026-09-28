@@ -4,8 +4,8 @@ Full run: [`test-e2e.log`](test-e2e.log) (`npm run test:e2e`, exit 0).
 Screenshots: [`ui/`](ui/), mobile 390×844, dark colour scheme, Chromium.
 
 ```bash
-npm run test:security   # Anchor: cargo test -p arisan_contracts --test security_p0 (4 tests + 1 ignored P-2 proof)
-npm run test:e2e:ui     # Playwright UI + API + header against `next build && next start` (58 tests)
+npm run test:security   # Anchor: cargo test -p arisan_contracts --test security_p0 (4 tests + 2 ignored proofs: P-2, P-3)
+npm run test:e2e:ui     # Playwright UI + API + header against `next build && next start` (59 tests)
 npm run test:e2e        # both
 ```
 
@@ -90,6 +90,8 @@ Each fix has a regression test.
 
 | E2E-13 | After Create, the app read the transaction back once, after a fixed 2 s wait. RPCs often haven't indexed a just-confirmed transaction yet. The creator then got "could not be read back", and since only the hash is on-chain, the pool's invite code was lost for good. | The readback polls for up to about 15 s. | create-success › "shown once" (not indexed until the 4th lookup), "invents nothing" |
 
+| E2E-14 | The authority could start a pool below capacity ("Start with 2 members" in a 3-seat pool). On-chain, that pool can never complete, so every stake is locked (#13). | Start is only offered once the pool is full ("Waiting for members (x/y)"). | pool-actions › "cannot start below capacity" |
+
 `e2e/create-success.spec.ts` runs the full Create success path. The mock wallet sends (`signAndSendTransaction`), the fake chain confirms over a mocked RPC WebSocket, and the invite code comes back only through the transaction's return data. The test checks that the code is shown once and copies, and that "Open pool" goes to the derived pool PDA.
 
 `e2e/pool-actions.spec.ts` covers the pool screen's primary action for each member state: visitor, unstaked member, authority waiting or ready to start, pay, paid, grace, unstaked-after-start, and removed. It runs against a fake chain of Pool, Member and Payment accounts at their real PDAs, and asserts which instruction each button asks the wallet to sign.
@@ -102,6 +104,7 @@ The header's Back button used `history.length`, which counts pages from other si
 
 - **[#11](https://github.com/hamzadiaz/arisan/issues/11) P-2, high: the invite code is derivable from public pool state.** `generate_invite_code(authority, unix_timestamp)` uses only `pool.authority` and `pool.created_at`, so anyone can compute any pool's code and join. Proof: `security_p0` › `outsider_cannot_derive_invite_code_from_pool_account`, `#[ignore]`d so the gate stays green; `cargo test … -- --ignored` shows the outsider joining. Fixing it needs a program change and an owner decision.
 
+- **[#13](https://github.com/hamzadiaz/arisan/issues/13) P-3, high: a pool started below capacity never completes, and its stakes are locked.** `total_rounds = max_members` is fixed at create, and `start_pool` accepts fewer members. After everyone has won, there's no eligible winner, the pool stays Active, and refunds require Completed. Proof: `security_p0` › `pool_started_below_capacity_completes_when_everyone_has_won` (`#[ignore]`d). The UI mitigates it (E2E-14).
 - [#8](https://github.com/hamzadiaz/arisan/issues/8) `start_pool` does not require stakes, which strands unstaked members. The UI mitigates it (E2E-10); the program fix is open.
 
 ## Remaining gaps (not faked)

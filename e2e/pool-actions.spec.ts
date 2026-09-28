@@ -51,6 +51,7 @@ test.describe("Pending pool", () => {
   test("the authority cannot start until every member has staked (E2E-10)", async ({ page }) => {
     await openPool(page, {
       authority: me,
+      maxMembers: 2,
       members: [{ wallet: me, stakeDeposited: true }, { wallet: other }],
     });
     const btn = main(page).getByRole("button", { name: "Waiting for stakes (1/2)" });
@@ -58,12 +59,23 @@ test.describe("Pending pool", () => {
     await proof(page, "p-waiting-for-stakes");
   });
 
-  test("the authority starts once everyone has staked", async ({ page }) => {
+  test("the authority cannot start below capacity (E2E-14, #13)", async ({ page }) => {
     await openPool(page, {
       authority: me,
+      maxMembers: 3,
       members: [{ wallet: me, stakeDeposited: true }, { wallet: other, stakeDeposited: true }],
     });
-    await expectSigned(page, "Start with 2 members", /^start_?[pP]ool$/);
+    await expect(main(page).getByRole("button", { name: "Waiting for members (2/3)" })).toBeDisabled();
+    await expect(main(page).getByRole("button", { name: "Start pool" })).toHaveCount(0);
+  });
+
+  test("the authority starts a full pool once everyone has staked", async ({ page }) => {
+    await openPool(page, {
+      authority: me,
+      maxMembers: 2,
+      members: [{ wallet: me, stakeDeposited: true }, { wallet: other, stakeDeposited: true }],
+    });
+    await expectSigned(page, "Start pool", /^start_?[pP]ool$/);
   });
 });
 

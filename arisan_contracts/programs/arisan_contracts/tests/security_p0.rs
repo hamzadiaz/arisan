@@ -739,3 +739,78 @@ async fn outsider_cannot_derive_invite_code_from_pool_account() {
         fixture.invite
     );
 }
+
+/// Pay the round for every wallet, commit randomness, and execute the draw for the
+/// derived winner. Returns the winner.
+async fn play_round(
+    context: &mut ProgramTestContext,
+    fixture: &PoolFixture,
+    players: &[&Keypair],
+    round: u8,
+) -> Pubkey {
+    for player in players {
+        pay(context, fixture, player, round).await;
+    }
+    let clock: Clock = context.banks_client.get_sysvar().await.unwrap();
+    context.warp_to_slot(clock.slot + 5).unwrap();
+    let committed_slot = commit(context, fixture).await;
+    context.warp_to_slot(committed_slot + 3).unwrap();
+
+    let slot_hash_account = account_data(context, slot_hashes::id()).await;
+    let hash = read_slot_hash(&slot_hash_account, committed_slot).unwrap();
+    let mut eligible = Vec::new();
+    for player in players {
+        let member = load_member(
+            &account_data(context, pda(&[b"member", fixture.pool.as_ref(), player.pubkey().as_ref()])).await,
+        );
+        if !member.has_won {
+            eligible.push(player.pubkey());
+        }
+    }
+    let winner = select_winner(&hash, &mut eligible).expect("an eligible member remains");
+    let member_pdas: Vec<Pubkey> = players
+        .iter()
+        .map(|p| pda(&[b"member", fixture.pool.as_ref(), p.pubkey().as_ref()]))
+        .collect();
+    let ix = execute_ix(fixture, context.payer.pubkey(), winner, round, &member_pdas);
+    assert_ok(&send(context, &[ix], &[]).await, "execute_draw");
+    winner
+}
+
+/// P-3 (issue filed): `total_rounds` is fixed to `max_members` at create, and
+/// `start_pool` accepts fewer members. With 2 of 3 seats filled, everyone has won after
+/// round 2, the pool can never reach Completed, and stake refunds (which require
+/// Completed) are locked forever.
+#[tokio::test]
+#[ignore = "P-3: pool started below capacity never completes; stakes locked (see docs/e2e-proof)"]
+async fn pool_started_below_capacity_completes_when_everyone_has_won() {
+    let member2 = Keypair::new();
+    let mut test = program_test();
+    test.add_account(
+        member2.pubkey(),
+        Account::new(2_000_000_000, 0, &system_program::id()),
+    );
+    let mut context = test.start_with_context().await;
+    let payer = context.payer.insecure_clone();
+
+    let fixture = create_pool(&mut context, 3, true).await; // 3 seats
+    join(&mut context, &fixture, &payer).await;
+    join(&mut context, &fixture, &member2).await; // only 2 join
+    deposit_stake(&mut context, &fixture, &payer).await;
+    deposit_stake(&mut context, &fixture, &member2).await;
+    start_pool(&mut context, &fixture).await;
+
+    let first = play_round(&mut context, &fixture, &[&payer, &member2], 1).await;
+    let second = play_round(&mut context, &fixture, &[&payer, &member2], 2).await;
+    assert_ne!(first, second, "each member wins exactly once");
+
+    let pool = load_pool(&account_data(&mut context, fixture.pool).await);
+    assert!(
+        pool.status == PoolStatus::Completed,
+        "both members have won but the pool is still {:?} at round {}/{}; claim_stake_refund requires Completed, so {} lamports of stakes are locked",
+        if pool.status == PoolStatus::Active { "Active" } else { "not Completed" },
+        pool.current_round,
+        pool.total_rounds,
+        CONTRIB * 2
+    );
+}
