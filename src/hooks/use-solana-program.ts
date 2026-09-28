@@ -615,6 +615,15 @@ export function useSolanaPoolActions() {
 }
 
 // Hook for fetching on-chain pool data
+/** Parse a pool address from a URL or user input; malformed ids resolve to "not found". */
+export function parsePublicKey(value: string): PublicKey | null {
+  try {
+    return new PublicKey(value);
+  } catch {
+    return null;
+  }
+}
+
 export function useSolanaPoolData() {
   const { program, walletAddress } = useArisanProgram();
   const [isLoading, setIsLoading] = useState(false);
@@ -634,11 +643,12 @@ export function useSolanaPoolData() {
   // Get a specific pool
   const getPool = useCallback(
     async (poolAddress: string): Promise<FetchedPool | null> => {
-      if (!program) return null;
+      const address = parsePublicKey(poolAddress);
+      if (!program || !address) return null;
 
       setIsLoading(true);
       try {
-        return await fetchPool(program, new PublicKey(poolAddress));
+        return await fetchPool(program, address);
       } finally {
         setIsLoading(false);
       }
@@ -664,11 +674,12 @@ export function useSolanaPoolData() {
   // Get pool members
   const getPoolMembers = useCallback(
     async (poolAddress: string): Promise<FetchedMember[]> => {
-      if (!program) return [];
+      const address = parsePublicKey(poolAddress);
+      if (!program || !address) return [];
 
       setIsLoading(true);
       try {
-        return await fetchPoolMembers(program, new PublicKey(poolAddress));
+        return await fetchPoolMembers(program, address);
       } finally {
         setIsLoading(false);
       }
@@ -679,15 +690,12 @@ export function useSolanaPoolData() {
   // Get current user's member account for a pool
   const getMemberAccount = useCallback(
     async (poolAddress: string): Promise<FetchedMember | null> => {
-      if (!program || !walletAddress) return null;
+      const address = parsePublicKey(poolAddress);
+      if (!program || !walletAddress || !address) return null;
 
       setIsLoading(true);
       try {
-        return await fetchMember(
-          program,
-          new PublicKey(poolAddress),
-          walletAddress
-        );
+        return await fetchMember(program, address, walletAddress);
       } finally {
         setIsLoading(false);
       }
@@ -698,11 +706,12 @@ export function useSolanaPoolData() {
   // Get pool payments
   const getPoolPayments = useCallback(
     async (poolAddress: string, round?: number): Promise<FetchedPayment[]> => {
-      if (!program) return [];
+      const address = parsePublicKey(poolAddress);
+      if (!program || !address) return [];
 
       setIsLoading(true);
       try {
-        return await fetchPoolPayments(program, new PublicKey(poolAddress), round);
+        return await fetchPoolPayments(program, address, round);
       } finally {
         setIsLoading(false);
       }
@@ -713,11 +722,12 @@ export function useSolanaPoolData() {
   // Get pool draws
   const getPoolDraws = useCallback(
     async (poolAddress: string): Promise<FetchedDraw[]> => {
-      if (!program) return [];
+      const address = parsePublicKey(poolAddress);
+      if (!program || !address) return [];
 
       setIsLoading(true);
       try {
-        return await fetchPoolDraws(program, new PublicKey(poolAddress));
+        return await fetchPoolDraws(program, address);
       } finally {
         setIsLoading(false);
       }

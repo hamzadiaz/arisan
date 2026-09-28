@@ -24,6 +24,26 @@ import { Pool, PoolMember, Payment, Draw, Currency, PoolStatus } from "@/types";
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type AccountNamespace = any;
 
+/**
+ * The RPC could not be reached or refused the request. Callers show a retryable
+ * network error instead of reporting the account as missing.
+ */
+export class ChainUnavailableError extends Error {
+  constructor(cause: unknown) {
+    super(cause instanceof Error ? cause.message : String(cause));
+    this.name = "ChainUnavailableError";
+  }
+}
+
+// Old pool layouts fail to decode; those are skipped rather than treated as outages.
+function isDecodeError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return (
+    error instanceof RangeError ||
+    /buffer|discriminator|decode|out of range/i.test(message)
+  );
+}
+
 // ============ Pool Account Fetching ============
 
 export interface FetchedPool extends Pool {
@@ -38,7 +58,8 @@ export async function fetchPool(
 ): Promise<FetchedPool | null> {
   try {
     const accounts = program.account as AccountNamespace;
-    const poolAccount = await accounts.pool.fetch(poolAddress);
+    const poolAccount = await accounts.pool.fetchNullable(poolAddress);
+    if (!poolAccount) return null;
     const pool = poolAccount as unknown as OnChainPool;
 
     // Get vault balance
@@ -79,13 +100,11 @@ export async function fetchPool(
     };
   } catch (error) {
     // Check if this is a buffer/deserialization error (likely old pool format)
-    const errorMsg = error instanceof Error ? error.message : String(error);
-    if (errorMsg.includes("buffer") || errorMsg.includes("RangeError")) {
+    if (isDecodeError(error)) {
       console.warn(`Skipping pool ${poolAddress.toBase58()}: incompatible format (likely old schema)`);
-    } else {
-      console.error("Failed to fetch pool:", error);
+      return null;
     }
-    return null;
+    throw new ChainUnavailableError(error);
   }
 }
 
@@ -95,44 +114,39 @@ export async function fetchPoolByInviteCode(
   program: Program,
   inviteCode: string
 ): Promise<FetchedPool | null> {
+  // Decode each pool on its own: one old-layout pool must not fail the whole lookup.
+  const poolName = program.idl.accounts?.find((a) => a.name.toLowerCase() === "pool")?.name ?? "pool";
+  let rawPools: readonly { pubkey: PublicKey; account: AccountInfo<Buffer> }[];
   try {
-    const accounts = program.account as AccountNamespace;
-    const allPools = await accounts.pool.all();
-
-    // Hash the input invite code using Web Crypto API (SHA-256)
-    const encoder = new TextEncoder();
-    const data = encoder.encode(inviteCode);
-    const hashBuffer = await crypto.subtle.digest("SHA-256", data as unknown as BufferSource);
-    const inputHash = new Uint8Array(hashBuffer);
-
-    for (const { publicKey, account } of allPools) {
-      try {
-        const pool = account as unknown as OnChainPool;
-
-        // Check if pool has the new invite_code_hash field (32 bytes)
-        if (!pool.inviteCodeHash || pool.inviteCodeHash.length !== 32) {
-          // Old pool format - skip
-          continue;
-        }
-
-        const storedHash = new Uint8Array(pool.inviteCodeHash);
-
-        // Compare hashes
-        if (inputHash.length === storedHash.length &&
-            inputHash.every((byte, i) => byte === storedHash[i])) {
-          return fetchPool(program, publicKey);
-        }
-      } catch {
-        // Skip pools that can't be parsed (old format)
-        continue;
-      }
-    }
-
-    return null;
+    rawPools = await program.provider.connection.getProgramAccounts(program.programId, {
+      filters: [{ memcmp: program.coder.accounts.memcmp(poolName) }],
+    });
   } catch (error) {
-    console.error("Failed to fetch pool by invite code:", error);
-    return null;
+    throw new ChainUnavailableError(error);
   }
+
+  // Hash the input invite code using Web Crypto API (SHA-256)
+  const encoder = new TextEncoder();
+  const data = encoder.encode(inviteCode);
+  const hashBuffer = await crypto.subtle.digest("SHA-256", data as unknown as BufferSource);
+  const inputHash = new Uint8Array(hashBuffer);
+
+  for (const { pubkey, account } of rawPools) {
+    let pool: OnChainPool;
+    try {
+      pool = program.coder.accounts.decode(poolName, account.data) as OnChainPool;
+    } catch {
+      continue; // Old pool format
+    }
+    if (!pool.inviteCodeHash || pool.inviteCodeHash.length !== 32) continue;
+
+    const storedHash = new Uint8Array(pool.inviteCodeHash);
+    if (inputHash.every((byte, i) => byte === storedHash[i])) {
+      return fetchPool(program, pubkey);
+    }
+  }
+
+  return null;
 }
 
 // Fetch all pools for a user (where they are a member)
@@ -164,8 +178,8 @@ export async function fetchUserPools(
 
     return pools.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
   } catch (error) {
-    console.error("Failed to fetch user pools:", error);
-    return [];
+    if (error instanceof ChainUnavailableError) throw error;
+    throw new ChainUnavailableError(error);
   }
 }
 

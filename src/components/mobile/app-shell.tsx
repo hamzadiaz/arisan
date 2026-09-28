@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useEffect } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { ChevronLeft, Home, Plus, Ticket } from "lucide-react";
 import { ThemeToggle } from "@/components/layout/theme-toggle";
@@ -13,6 +14,11 @@ const NAV = [
   { href: "/join", label: "Join", icon: Ticket },
 ];
 
+// Screens visited in this tab since the app loaded. Back pops in-app history when
+// there is some; a deep link (shared pool URL, reload) goes Home instead of leaving.
+let inAppScreens = 0;
+let lastPath: string | null = null;
+
 interface AppShellProps {
   title?: string;
   back?: boolean;
@@ -23,13 +29,20 @@ export function AppShell({ title, back, children }: AppShellProps) {
   const pathname = usePathname();
   const router = useRouter();
 
+  useEffect(() => {
+    if (pathname !== lastPath) {
+      inAppScreens += 1;
+      lastPath = pathname;
+    }
+  }, [pathname]);
+
   return (
     <div className="mx-auto flex min-h-dvh w-full max-w-[480px] flex-col bg-background">
       <header className="sticky top-0 z-40 border-b border-border/60 bg-background/85 pt-[env(safe-area-inset-top)] backdrop-blur-xl">
         <div className="flex h-14 items-center gap-2 px-4">
           {back ? (
             <button
-              onClick={() => (window.history.length > 1 ? router.back() : router.push("/"))}
+              onClick={() => (inAppScreens > 1 ? router.back() : router.push("/"))}
               className="-ml-2 flex size-10 items-center justify-center rounded-full active:bg-muted"
               aria-label="Back"
             >

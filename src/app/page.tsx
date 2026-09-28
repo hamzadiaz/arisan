@@ -76,16 +76,27 @@ function MyPools() {
   const { getUserPools } = useSolanaPoolData();
   const { publicKey } = useWallet();
   const [pools, setPools] = useState<FetchedPool[] | null>(null);
+  const [loadFailed, setLoadFailed] = useState(false);
+  const [attempt, setAttempt] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
-    getUserPools().then((result) => {
-      if (!cancelled) setPools(result);
-    });
+    getUserPools().then(
+      (result) => {
+        if (cancelled) return;
+        setPools(result);
+        setLoadFailed(false);
+      },
+      (error) => {
+        if (cancelled) return;
+        console.error("Failed to load pools:", error);
+        setLoadFailed(true);
+      }
+    );
     return () => {
       cancelled = true;
     };
-  }, [getUserPools, publicKey]);
+  }, [getUserPools, publicKey, attempt]);
 
   const nextDue = useMemo(
     () =>
@@ -134,7 +145,23 @@ function MyPools() {
       </div>
 
       <Section title="My pools">
-        {pools === null ? (
+        {pools === null && loadFailed ? (
+          <Panel className="py-8 text-center">
+            <p className="font-semibold">Can&apos;t reach Solana</p>
+            <p className="mt-1 text-sm text-muted-foreground">
+              Your pools couldn&apos;t be loaded. Check your connection.
+            </p>
+            <button
+              onClick={() => {
+                setLoadFailed(false);
+                setAttempt((n) => n + 1);
+              }}
+              className="mt-4 inline-flex h-11 items-center rounded-xl bg-muted px-4 text-sm font-semibold active:scale-95"
+            >
+              Try again
+            </button>
+          </Panel>
+        ) : pools === null ? (
           <div className="space-y-3">
             {[0, 1].map((i) => (
               <div key={i} className="h-20 animate-pulse rounded-2xl bg-muted" />

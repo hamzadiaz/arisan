@@ -4,10 +4,10 @@ import { use, useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { PublicKey } from "@solana/web3.js";
 import { useConnection, useWallet } from "@solana/wallet-adapter-react";
-import { Check, Clock, Crown, ExternalLink, RefreshCw, Trophy } from "lucide-react";
+import { Check, Clock, Crown, ExternalLink, RefreshCw, Trophy, WifiOff } from "lucide-react";
 import { AppShell, Panel, PrimaryButton, Section, StatusPill } from "@/components/mobile/app-shell";
 import { ConnectWalletButton } from "@/components/mobile/wallet-button";
-import { useSolanaPoolActions, useSolanaPoolData } from "@/hooks/use-solana-program";
+import { parsePublicKey, useSolanaPoolActions, useSolanaPoolData } from "@/hooks/use-solana-program";
 import type { FetchedDraw, FetchedMember, FetchedPayment, FetchedPool } from "@/lib/solana/accounts";
 import { addressExplorerLink, formatAmount, shortAddress, timeUntil } from "@/lib/format";
 import { dismissToast, poolToasts, txErrorToast } from "@/lib/solana/transaction-toast";
@@ -28,6 +28,7 @@ export default function PoolPage({ params }: { params: Promise<{ id: string }> }
   const actions = useSolanaPoolActions();
 
   const [data, setData] = useState<PoolData | null>(null);
+  const [loadFailed, setLoadFailed] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [, setTick] = useState(0);
 
@@ -41,13 +42,30 @@ export default function PoolPage({ params }: { params: Promise<{ id: string }> }
     return { pool, members, payments, draws };
   }, [poolId, getPool, getPoolMembers, getPoolPayments, getPoolDraws]);
 
-  const load = useCallback(async () => setData(await fetchData()), [fetchData]);
+  const load = useCallback(async () => {
+    try {
+      setData(await fetchData());
+      setLoadFailed(false);
+    } catch (error) {
+      console.error("Failed to load pool:", error);
+      setLoadFailed(true);
+    }
+  }, [fetchData]);
 
   useEffect(() => {
     let cancelled = false;
-    fetchData().then((result) => {
-      if (!cancelled) setData(result);
-    });
+    fetchData().then(
+      (result) => {
+        if (cancelled) return;
+        setData(result);
+        setLoadFailed(false);
+      },
+      (error) => {
+        if (cancelled) return;
+        console.error("Failed to load pool:", error);
+        setLoadFailed(true);
+      }
+    );
     return () => {
       cancelled = true;
     };
@@ -55,12 +73,9 @@ export default function PoolPage({ params }: { params: Promise<{ id: string }> }
 
   // Live updates when the pool account changes on-chain
   useEffect(() => {
-    let id: number | null = null;
-    try {
-      id = connection.onAccountChange(new PublicKey(poolId), () => load(), "confirmed");
-    } catch {
-      // Invalid pool address; the page renders "not found"
-    }
+    const address = parsePublicKey(poolId);
+    // A malformed address has nothing to watch; the page renders "not found"
+    const id = address ? connection.onAccountChange(address, () => load(), "confirmed") : null;
     return () => {
       if (id !== null) connection.removeAccountChangeListener(id);
     };
@@ -77,6 +92,28 @@ export default function PoolPage({ params }: { params: Promise<{ id: string }> }
     await load();
     setRefreshing(false);
   };
+
+  if (!data && loadFailed) {
+    return (
+      <AppShell title="Pool" back>
+        <Panel className="py-10 text-center">
+          <WifiOff className="mx-auto mb-3 size-8 text-muted-foreground" />
+          <p className="font-semibold">Can&apos;t reach Solana</p>
+          <p className="mt-1 text-sm text-muted-foreground">
+            The pool couldn&apos;t be loaded. Check your connection and try again.
+          </p>
+          <button
+            onClick={refresh}
+            disabled={refreshing}
+            className="mt-4 inline-flex h-11 items-center gap-2 rounded-xl bg-muted px-4 text-sm font-semibold active:scale-95 disabled:opacity-50"
+          >
+            <RefreshCw className={cn("size-4", refreshing && "animate-spin")} />
+            Try again
+          </button>
+        </Panel>
+      </AppShell>
+    );
+  }
 
   if (!data) {
     return (
