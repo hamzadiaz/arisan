@@ -2,9 +2,11 @@
 
 import { useWallet, useConnection } from "@solana/wallet-adapter-react";
 import { useState, useCallback, useMemo } from "react";
-import { Transaction, PublicKey, Connection } from "@solana/web3.js";
+import { Transaction, PublicKey } from "@solana/web3.js";
 
-export type WalletMode = "web3" | "custodial" | "none";
+// Self-custodial only: the connected wallet (Seed Vault, Phantom, Solflare via
+// Mobile Wallet Adapter / Seeker Connect) signs every transaction.
+export type WalletMode = "web3" | "none";
 
 interface TransactionResult {
   success: boolean;
@@ -15,76 +17,51 @@ interface TransactionResult {
 
 export function useWalletMode() {
   const { connection } = useConnection();
-  const { connected, publicKey, signTransaction, sendTransaction } = useWallet();
+  const { connected, publicKey, sendTransaction } = useWallet();
   const [isLoading, setIsLoading] = useState(false);
 
-  // CLOCK IN is self-custodial. A server-held key is never the active signer.
-  const mode: WalletMode = useMemo(() => {
-    if (connected && publicKey) {
-      return "web3";
-    }
-    return "none";
-  }, [connected, publicKey]);
+  const mode: WalletMode = connected && publicKey ? "web3" : "none";
 
-  // Get the active wallet address
-  const walletAddress = useMemo(() => {
-    if (mode === "web3" && publicKey) {
-      return publicKey.toBase58();
-    }
-    return null;
-  }, [mode, publicKey]);
+  const walletAddress = useMemo(
+    () => (mode === "web3" && publicKey ? publicKey.toBase58() : null),
+    [mode, publicKey]
+  );
 
-  // Get PublicKey object for the active wallet
-  const walletPublicKey = useMemo(() => {
-    if (!walletAddress) return null;
-    try {
-      return new PublicKey(walletAddress);
-    } catch {
-      return null;
-    }
-  }, [walletAddress]);
+  const walletPublicKey = mode === "web3" ? publicKey : null;
 
-  // Sign and send transaction (works for both modes)
   const sendWalletTransaction = useCallback(
     async (
       transaction: Transaction,
+      // Kept for call-site compatibility; used only for logging context
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
       _action: string
     ): Promise<TransactionResult> => {
-      if (mode === "none") {
-        return { success: false, error: "No wallet available" };
+      if (!publicKey) {
+        return { success: false, error: "Wallet not connected" };
       }
 
       setIsLoading(true);
 
       try {
-        if (mode === "web3") {
-          // Web3 mode: User signs directly with their wallet
-          if (!signTransaction || !publicKey) {
-            return { success: false, error: "Wallet not connected" };
-          }
+        const { blockhash, lastValidBlockHeight } =
+          await connection.getLatestBlockhash();
+        transaction.recentBlockhash = blockhash;
+        transaction.feePayer = publicKey;
 
-          const { blockhash, lastValidBlockHeight } =
-            await connection.getLatestBlockhash();
-          transaction.recentBlockhash = blockhash;
-          transaction.feePayer = publicKey;
+        const signature = await sendTransaction(transaction, connection);
 
-          const signature = await sendTransaction(transaction, connection);
+        await connection.confirmTransaction({
+          signature,
+          blockhash,
+          lastValidBlockHeight,
+        });
 
-          await connection.confirmTransaction({
-            signature,
-            blockhash,
-            lastValidBlockHeight,
-          });
-
-          const network = process.env.NEXT_PUBLIC_SOLANA_NETWORK || "devnet";
-          return {
-            success: true,
-            signature,
-            explorerLink: `https://explorer.solana.com/tx/${signature}?cluster=${network}`,
-          };
-        }
-
-        return { success: false, error: "Connect a self-custodial wallet to sign" };
+        const network = process.env.NEXT_PUBLIC_SOLANA_NETWORK || "devnet";
+        return {
+          success: true,
+          signature,
+          explorerLink: `https://explorer.solana.com/tx/${signature}?cluster=${network}`,
+        };
       } catch (error: unknown) {
         const message = error instanceof Error ? error.message : "Transaction failed";
         return { success: false, error: message };
@@ -92,10 +69,9 @@ export function useWalletMode() {
         setIsLoading(false);
       }
     },
-    [mode, connection, signTransaction, sendTransaction, publicKey]
+    [connection, sendTransaction, publicKey]
   );
 
-  // Helper to build and send transaction in one call
   const buildAndSendTransaction = useCallback(
     async (
       buildFn: (walletPubkey: PublicKey) => Promise<Transaction>,
@@ -117,22 +93,18 @@ export function useWalletMode() {
   );
 
   return {
-    // Mode info
     mode,
     isWeb3: mode === "web3",
-    isCustodial: mode === "custodial",
+    isCustodial: false as const,
     hasWallet: mode !== "none",
 
-    // Wallet info
     walletAddress,
     walletPublicKey,
 
-    // Transaction helpers
     sendTransaction: sendWalletTransaction,
     buildAndSendTransaction,
     isLoading,
 
-    // Raw connection for queries
     connection,
   };
 }

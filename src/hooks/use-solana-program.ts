@@ -3,7 +3,7 @@
 import { useMemo, useCallback, useState } from "react";
 import { useConnection, useWallet } from "@solana/wallet-adapter-react";
 import { Program, AnchorProvider, BN } from "@coral-xyz/anchor";
-import { PublicKey, Transaction, VersionedTransaction } from "@solana/web3.js";
+import { PublicKey, Transaction } from "@solana/web3.js";
 import {
   createProvider,
   getProgram,
@@ -53,32 +53,27 @@ import {
   FetchedDraw,
 } from "@/lib/solana/accounts";
 
-// Hook to get the Anchor program instance
-// Supports both web3 wallets and custodial wallets
+// Hook to get the Anchor program instance.
+// Without a connected wallet it returns a read-only program so pool data
+// (join previews, pool pages) can load before the user connects.
 export function useArisanProgram() {
   const { connection } = useConnection();
   const wallet = useWallet();
   const { walletPublicKey, isCustodial, hasWallet } = useWalletMode();
 
-  // Use custodial public key if available, otherwise use web3 wallet
   const activePublicKey = walletPublicKey || wallet.publicKey;
 
   const program = useMemo(() => {
-    if (!activePublicKey) {
-      return null;
-    }
-
-    // For custodial wallets, we create a "read-only" provider
-    // Transactions will be signed via the custodial API
-    const dummySignTransaction = async <T extends Transaction | VersionedTransaction>(tx: T): Promise<T> => tx;
-    const dummySignAllTransactions = async <T extends Transaction | VersionedTransaction>(txs: T[]): Promise<T[]> => txs;
+    const readOnly = async (): Promise<never> => {
+      throw new Error("Connect a wallet to sign");
+    };
 
     const provider = new AnchorProvider(
       connection,
       {
-        publicKey: activePublicKey,
-        signTransaction: wallet.signTransaction || dummySignTransaction,
-        signAllTransactions: wallet.signAllTransactions || dummySignAllTransactions,
+        publicKey: activePublicKey ?? PublicKey.default,
+        signTransaction: wallet.signTransaction ?? readOnly,
+        signAllTransactions: wallet.signAllTransactions ?? readOnly,
       },
       { commitment: "confirmed" }
     );
@@ -89,7 +84,7 @@ export function useArisanProgram() {
   return {
     program,
     programId: PROGRAM_ID,
-    isReady: !!program && hasWallet,
+    isReady: hasWallet,
     walletAddress: activePublicKey,
     isCustodial,
   };
