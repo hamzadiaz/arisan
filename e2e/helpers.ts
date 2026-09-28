@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import path from "node:path";
-import { BN, BorshAccountsCoder, utils, type Idl } from "@coral-xyz/anchor";
-import { PublicKey } from "@solana/web3.js";
+import { BN, BorshAccountsCoder, BorshInstructionCoder, utils, type Idl } from "@coral-xyz/anchor";
+import { PublicKey, Transaction } from "@solana/web3.js";
 import { expect, type Page } from "@playwright/test";
 import idl from "../src/lib/solana/idl.json";
 
@@ -148,7 +148,8 @@ export async function mockRpcWithPool(page: Page) {
 // ---------------------------------------------------------------------------
 // Mock Wallet Standard wallet. It registers the same way Phantom or MWA do, so the
 // app's own wallet-adapter stack discovers it, lists it in the sheet and connects.
-// It refuses to sign: these tests cover identity, not transactions.
+// It refuses to sign, but records each transaction it was asked to sign
+// (see signRequests) so tests can check what the UI would have sent.
 // ---------------------------------------------------------------------------
 
 export const MOCK_WALLET = {
@@ -207,7 +208,10 @@ export async function installMockWallet(page: Page) {
           "solana:signTransaction": {
             version: "1.0.0",
             supportedTransactionVersions: ["legacy", 0],
-            signTransaction: async () => {
+            signTransaction: async (...inputs: { transaction: Uint8Array }[]) => {
+              // Record what the app asked to sign so tests can decode it, then refuse.
+              const w = window as unknown as { __e2eSignRequests?: number[][] };
+              (w.__e2eSignRequests ??= []).push(...inputs.map((i) => [...i.transaction]));
               throw new Error("E2E wallet does not sign");
             },
           },
@@ -230,4 +234,18 @@ export async function connectMockWallet(page: Page) {
   );
   await walletSheet(page).getByRole("button", { name: new RegExp(MOCK_WALLET.name) }).click();
   await expect(page.locator("header").getByText(MOCK_WALLET_SHORT)).toBeVisible();
+}
+
+/** Instructions for the Arisan program in every transaction the mock wallet was asked to sign. */
+export async function signRequests(page: Page) {
+  const raw = await page.evaluate(
+    () => (window as unknown as { __e2eSignRequests?: number[][] }).__e2eSignRequests ?? []
+  );
+  const coder = new BorshInstructionCoder(idl as Idl);
+  return raw.flatMap((bytes) => {
+    const tx = Transaction.from(Buffer.from(bytes));
+    return tx.instructions
+      .filter((ix) => ix.programId.equals(PROGRAM_ID))
+      .map((ix) => coder.decode(ix.data));
+  });
 }
