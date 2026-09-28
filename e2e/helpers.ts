@@ -58,6 +58,40 @@ export const MOCK_POOL = {
   lamportsPerRound: 500_000_000,
 };
 
+/** Minimal confirmed-transaction RPC result carrying program return data. */
+function confirmedTransaction(signature: string, returnData: string) {
+  return {
+    slot: 1,
+    blockTime: 1_750_000_000,
+    version: "legacy",
+    transaction: {
+      signatures: [signature],
+      message: {
+        accountKeys: [MOCK_WALLET.address, PROGRAM_ID.toBase58()],
+        header: { numRequiredSignatures: 1, numReadonlySignedAccounts: 0, numReadonlyUnsignedAccounts: 1 },
+        instructions: [{ programIdIndex: 1, accounts: [0], data: "" }],
+        recentBlockhash: PublicKey.default.toBase58(),
+      },
+    },
+    meta: {
+      err: null,
+      fee: 5000,
+      preBalances: [0, 0],
+      postBalances: [0, 0],
+      innerInstructions: [],
+      logMessages: ["Program log: Instruction: CreatePool"],
+      preTokenBalances: [],
+      postTokenBalances: [],
+      loadedAddresses: { writable: [], readonly: [] },
+      returnData: {
+        programId: PROGRAM_ID.toBase58(),
+        data: [Buffer.from(returnData).toString("base64"), "base64"],
+      },
+      computeUnitsConsumed: 1000,
+    },
+  };
+}
+
 export interface MockMember {
   wallet: PublicKey;
   stakeDeposited?: boolean;
@@ -72,6 +106,9 @@ export interface MockScenario {
   members?: MockMember[];
   /** Wallets that have paid the current round */
   paid?: PublicKey[];
+  /** For wallets that send: getTransaction answers null this many times, then the
+   *  transaction with `returnData` (base64 of the given string). */
+  sentTx?: { indexedAfter: number; returnData: string };
 }
 
 const pda = (seeds: (Buffer | Uint8Array)[]) =>
@@ -205,11 +242,58 @@ export async function mockRpcWithPool(page: Page, scenario: MockScenario = {}) {
           .map(([pubkey, data]) => ({ pubkey, account: toAccount(data) }));
       }
       case "getLatestBlockhash":
-        return { context, value: { blockhash: PublicKey.default.toBase58(), lastValidBlockHeight: 1 } };
+        return {
+          context,
+          value: { blockhash: PublicKey.default.toBase58(), lastValidBlockHeight: 1_000_000 },
+        };
+      case "getBlockHeight":
+        return 1;
+      case "getSignatureStatuses":
+        return {
+          context,
+          value: (params[0] as string[]).map(() => ({
+            slot: 1,
+            confirmations: null,
+            err: null,
+            confirmationStatus: "confirmed",
+          })),
+        };
+      case "getTransaction": {
+        const sent = scenario.sentTx;
+        if (!sent || txLookups++ < sent.indexedAfter) return null;
+        return confirmedTransaction(params[0] as string, sent.returnData);
+      }
       default:
         return null;
     }
   };
+  let txLookups = 0;
+
+  // Subscriptions (confirmTransaction's signatureSubscribe) resolve immediately.
+  await page.routeWebSocket(
+    (url) => url.hostname === "127.0.0.1" && url.port === "8900",
+    (ws) => {
+      let nextId = 1;
+      ws.onMessage((message) => {
+        const req = JSON.parse(String(message));
+        if (String(req.method).endsWith("Unsubscribe")) {
+          ws.send(JSON.stringify({ jsonrpc: "2.0", id: req.id, result: true }));
+          return;
+        }
+        const subscription = nextId++;
+        ws.send(JSON.stringify({ jsonrpc: "2.0", id: req.id, result: subscription }));
+        if (req.method === "signatureSubscribe") {
+          ws.send(
+            JSON.stringify({
+              jsonrpc: "2.0",
+              method: "signatureNotification",
+              params: { subscription, result: { context: { slot: 1 }, value: { err: null } } },
+            })
+          );
+        }
+      });
+    }
+  );
 
   await page.route((url) => url.origin === RPC_URL, async (route) => {
     const body = route.request().postDataJSON();
@@ -238,16 +322,22 @@ export const MOCK_WALLET = {
 };
 export const MOCK_WALLET_SHORT = `${MOCK_WALLET.address.slice(0, 4)}…${MOCK_WALLET.address.slice(-4)}`;
 
-export async function installMockWallet(page: Page) {
+/**
+ * `sends: true` adds solana:signAndSendTransaction, returning a fixed signature without
+ * broadcasting (the fake chain then confirms it). Otherwise the wallet refuses to sign.
+ */
+export async function installMockWallet(page: Page, options: { sends?: boolean } = {}) {
   const publicKey = [...new PublicKey(MOCK_WALLET.address).toBytes()];
   await page.addInitScript(
-    ({ name, address, publicKey }) => {
+    ({ name, address, publicKey, sends }) => {
       const chains = ["solana:devnet", "solana:testnet", "solana:mainnet", "solana:localnet"];
       const account = {
         address,
         publicKey: new Uint8Array(publicKey),
         chains,
-        features: ["solana:signTransaction"],
+        features: sends
+          ? ["solana:signTransaction", "solana:signAndSendTransaction"]
+          : ["solana:signTransaction"],
       };
       let accounts: (typeof account)[] = [];
       const listeners: Record<string, ((props: unknown) => void)[]> = {};
@@ -285,6 +375,19 @@ export async function installMockWallet(page: Page) {
               };
             },
           },
+          ...(sends
+            ? {
+                "solana:signAndSendTransaction": {
+                  version: "1.0.0",
+                  supportedTransactionVersions: ["legacy", 0],
+                  signAndSendTransaction: async (...inputs: { transaction: Uint8Array }[]) => {
+                    const w = window as unknown as { __e2eSignRequests?: number[][] };
+                    (w.__e2eSignRequests ??= []).push(...inputs.map((i) => [...i.transaction]));
+                    return inputs.map(() => ({ signature: new Uint8Array(64).fill(7) }));
+                  },
+                },
+              }
+            : {}),
           "solana:signTransaction": {
             version: "1.0.0",
             supportedTransactionVersions: ["legacy", 0],
@@ -303,7 +406,7 @@ export async function installMockWallet(page: Page) {
       );
       window.dispatchEvent(new CustomEvent("wallet-standard:register-wallet", { detail: register }));
     },
-    { name: MOCK_WALLET.name, address: MOCK_WALLET.address, publicKey }
+    { name: MOCK_WALLET.name, address: MOCK_WALLET.address, publicKey, sends: !!options.sends }
   );
 }
 
