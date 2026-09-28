@@ -1,8 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createCustodialWallet, getCustodialWalletAddress } from "@/lib/custodial/wallet-service";
+import { createCustodialWallet, custodialSigningEnabled, getCustodialWalletAddress } from "@/lib/custodial/wallet-service";
 import { verifyFirebaseToken, getAdminDb } from "@/lib/firebase-admin";
 
 export async function POST(request: NextRequest) {
+  if (!custodialSigningEnabled()) {
+    return NextResponse.json(
+      { error: "Custodial wallets are disabled. CLOCK IN uses a self-custodial wallet." },
+      { status: 410 }
+    );
+  }
+
   try {
     // Verify Firebase auth token
     const authHeader = request.headers.get("authorization");
@@ -64,6 +71,13 @@ export async function POST(request: NextRequest) {
 
 // GET endpoint to check if user has a custodial wallet
 export async function GET(request: NextRequest) {
+  if (!custodialSigningEnabled()) {
+    return NextResponse.json(
+      { error: "Custodial wallets are disabled. CLOCK IN uses a self-custodial wallet." },
+      { status: 410 }
+    );
+  }
+
   try {
     const authHeader = request.headers.get("authorization");
     if (!authHeader?.startsWith("Bearer ")) {

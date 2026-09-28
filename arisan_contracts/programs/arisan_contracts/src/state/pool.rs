@@ -91,6 +91,20 @@ pub struct Pool {
 
     /// Auto mode: pre-fund all payments on join, auto-start when full
     pub auto_mode: bool,
+
+    /// Wallets that joined, in join order. Empty slots are `Pubkey::default()`.
+    /// Kicked members stay here so a draw can still see the full roster.
+    pub member_wallets: [Pubkey; 20],
+
+    /// Number of occupied slots in `member_wallets`.
+    /// Changes on join and leave, not when a member is kicked.
+    pub roster_len: u8,
+
+    /// Slot whose hash selects the winner for `randomness_round`. 0 if unset.
+    pub randomness_slot: u64,
+
+    /// Round the commit belongs to. 0 means no commit. Rounds start at 1.
+    pub randomness_round: u8,
 }
 
 impl Pool {
@@ -117,7 +131,11 @@ impl Pool {
         + 8   // pool_index: u64
         + 1   // stake_enabled: bool
         + 8   // grace_period_seconds: i64
-        + 1;  // auto_mode: bool
+        + 1   // auto_mode: bool
+        + (32 * 20) // member_wallets: [Pubkey; 20]
+        + 1   // roster_len: u8
+        + 8   // randomness_slot: u64
+        + 1;  // randomness_round: u8
 
     /// Seeds for Pool PDA derivation
     pub const SEED_PREFIX: &'static [u8] = b"pool";

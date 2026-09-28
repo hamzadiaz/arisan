@@ -63,6 +63,10 @@ export interface OnChainPool {
   gracePeriodSeconds: BN;
   // Auto mode field
   autoMode: boolean;
+  memberWallets: PublicKey[];
+  rosterLen: number;
+  randomnessSlot: BN;
+  randomnessRound: number;
 }
 
 // On-chain Member data structure
@@ -119,9 +123,8 @@ export function decodePoolName(nameBytes: number[]): string {
   return new TextDecoder().decode(new Uint8Array(bytes));
 }
 
-// DEPRECATED: Invite codes are now stored as SHA256 hashes and cannot be decoded
-// The plaintext invite code is only available from the PoolCreated event at creation time
-// @deprecated Use event logs from pool creation transaction to get invite code
+// DEPRECATED: Invite codes are stored as SHA256 hashes.
+// The creator reads the plaintext from create_pool return data, not from logs.
 export function decodeInviteCode(codeBytes: number[]): string {
   // This will return garbage for hashed values - only kept for backward compatibility
   console.warn("decodeInviteCode is deprecated - invite codes are now hashed");

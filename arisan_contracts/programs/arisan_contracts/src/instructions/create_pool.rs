@@ -1,5 +1,6 @@
 use anchor_lang::prelude::*;
 use anchor_lang::solana_program::hash::hash;
+use anchor_lang::solana_program::program::set_return_data;
 
 use crate::state::{Pool, Currency, PoolStatus, CreatorStats};
 use crate::errors::ArisanError;
@@ -141,7 +142,10 @@ pub fn handler(
         creator_stats.bump = ctx.bumps.creator_stats;
     }
 
-    // Emit event (like Solidity events)
+    // The creator reads this from transaction return data. It is not a log line
+    // and not an event field, so program logs do not contain the plaintext code.
+    set_return_data(&invite_code);
+
     emit!(PoolCreated {
         pool: pool.key(),
         authority: pool.authority,
@@ -149,13 +153,11 @@ pub fn handler(
         max_members,
         contribution_amount,
         currency: currency_enum,
-        invite_code: String::from_utf8_lossy(&invite_code).to_string(),
         stake_enabled,
         auto_mode,
     });
 
     msg!("Pool created: {}", pool.key());
-    msg!("Invite code: {}", String::from_utf8_lossy(&invite_code));
 
     Ok(())
 }
@@ -189,7 +191,6 @@ pub struct PoolCreated {
     pub max_members: u8,
     pub contribution_amount: u64,
     pub currency: Currency,
-    pub invite_code: String,
     pub stake_enabled: bool,
     pub auto_mode: bool,
 }

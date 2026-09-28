@@ -74,38 +74,6 @@ export function AuthProvider({ children }: AuthProviderProps) {
             ...userData,
           } as User;
 
-          // If no custodialWallet in Firestore, check with the API
-          if (!userData.custodialWallet) {
-            try {
-              const idToken = await fbUser.getIdToken();
-              const response = await fetch("/api/custodial/create-wallet", {
-                method: "GET",
-                headers: {
-                  Authorization: `Bearer ${idToken}`,
-                },
-              });
-              if (response.ok) {
-                const result = await response.json();
-                if (result.hasCustodialWallet && result.walletAddress) {
-                  // Update local state with custodial wallet
-                  loadedUser = {
-                    ...loadedUser,
-                    custodialWallet: result.walletAddress,
-                    walletMode: "custodial" as const,
-                  };
-                  // Also update Firestore to cache it
-                  await updateDoc(doc(db, "users", fbUser.uid), {
-                    custodialWallet: result.walletAddress,
-                    walletMode: "custodial",
-                    updatedAt: serverTimestamp(),
-                  });
-                }
-              }
-            } catch (err) {
-              console.error("Failed to check custodial wallet:", err);
-            }
-          }
-
           setUser(loadedUser);
         } else {
           // Create initial user profile
@@ -180,35 +148,8 @@ export function AuthProvider({ children }: AuthProviderProps) {
       });
 
       setUser({ id: fbUser.uid, ...newUser });
-
-      // Create custodial wallet if requested and no web3 wallet connected
-      if (shouldCreateCustodialWallet && !walletAddress) {
-        // Wait a moment for the auth state to settle
-        setTimeout(async () => {
-          try {
-            const idToken = await fbUser.getIdToken();
-            const response = await fetch("/api/custodial/create-wallet", {
-              method: "POST",
-              headers: {
-                Authorization: `Bearer ${idToken}`,
-              },
-            });
-            const result = await response.json();
-            if (result.success) {
-              setUser((prev) =>
-                prev
-                  ? {
-                      ...prev,
-                      custodialWallet: result.walletAddress,
-                      walletMode: "custodial",
-                    }
-                  : null
-              );
-            }
-          } catch (err) {
-            console.error("Failed to create custodial wallet:", err);
-          }
-        }, 500);
+      if (shouldCreateCustodialWallet) {
+        // Custodial key creation is disabled for CLOCK IN.
       }
     } finally {
       setIsLoading(false);
@@ -216,43 +157,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
   };
 
   const createCustodialWallet = async (): Promise<string | null> => {
-    if (!firebaseUser) {
-      console.error("User not authenticated");
-      return null;
-    }
-
-    try {
-      const idToken = await firebaseUser.getIdToken();
-      const response = await fetch("/api/custodial/create-wallet", {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${idToken}`,
-        },
-      });
-
-      const result = await response.json();
-      if (!response.ok) {
-        throw new Error(result.error || "Failed to create wallet");
-      }
-
-      if (result.success) {
-        setUser((prev) =>
-          prev
-            ? {
-                ...prev,
-                custodialWallet: result.walletAddress,
-                walletMode: "custodial",
-              }
-            : null
-        );
-        return result.walletAddress;
-      }
-
-      return null;
-    } catch (err) {
-      console.error("Failed to create custodial wallet:", err);
-      return null;
-    }
+    return null;
   };
 
   const signOut = async () => {

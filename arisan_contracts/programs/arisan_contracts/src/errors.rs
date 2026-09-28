@@ -85,4 +85,34 @@ pub enum ArisanError {
 
     #[msg("Stake not enabled for this pool")]
     StakeNotEnabled,
+
+    #[msg("Winner is not the member derived from on-chain randomness")]
+    WinnerMismatch,
+
+    #[msg("Member set does not match the pool roster")]
+    InvalidMemberSet,
+
+    #[msg("No eligible members for this draw")]
+    NoEligibleMembers,
+
+    #[msg("Draw randomness has not been committed for this round")]
+    RandomnessNotCommitted,
+
+    #[msg("Draw randomness is not ready yet")]
+    RandomnessNotReady,
+
+    #[msg("Committed slot hash expired before the draw was revealed")]
+    RandomnessExpired,
+
+    #[msg("Draw randomness is already committed for this round")]
+    RandomnessAlreadyCommitted,
+
+    #[msg("Member has already paid this round")]
+    MemberAlreadyPaid,
+
+    #[msg("Round payment window is still open")]
+    RoundNotDue,
+
+    #[msg("Payment account does not match this member and round")]
+    InvalidPaymentAccount,
 }

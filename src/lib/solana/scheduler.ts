@@ -5,9 +5,10 @@
  * Used by the Vercel cron job to trigger draws without user intervention.
  */
 
-import { Connection, Keypair, PublicKey, Transaction, VersionedTransaction, sendAndConfirmTransaction } from "@solana/web3.js";
+import { Connection, Keypair, PublicKey, SystemProgram, Transaction, VersionedTransaction, sendAndConfirmTransaction } from "@solana/web3.js";
 import { Program, AnchorProvider } from "@coral-xyz/anchor";
-import { getProgram, OnChainPool, OnChainMember, getPoolStatusString, getDrawPDA, getVaultPDA } from "./program";
+import { getProgram, OnChainPool, OnChainMember, getPoolStatusString, getDrawPDA, getVaultPDA, getMemberPDA } from "./program";
+import { SLOT_HASHES_SYSVAR, isDrawEligible, readSlotHash, selectDerivedWinner } from "./bound-draw";
 import bs58 from "bs58";
 
 // Wallet interface compatible with AnchorProvider
@@ -260,83 +261,128 @@ export async function getEligibleMembers(
  * Select a random winner from eligible members
  * Uses crypto.getRandomValues for secure randomness
  */
-export function selectRandomWinner(members: EligibleMember[]): EligibleMember | null {
-  if (members.length === 0) {
-    return null;
-  }
 
-  // Use crypto for secure randomness
-  const randomBytes = new Uint32Array(1);
-  crypto.getRandomValues(randomBytes);
-  const randomIndex = randomBytes[0] % members.length;
-
-  return members[randomIndex];
-}
 
 // ============ Draw Execution ============
 
 /**
  * Execute a draw for a specific pool
  */
+async function sendSchedulerTx(
+  connection: Connection,
+  keypair: Keypair,
+  tx: Transaction
+): Promise<string> {
+  const { blockhash } = await connection.getLatestBlockhash();
+  tx.recentBlockhash = blockhash;
+  tx.feePayer = keypair.publicKey;
+  return sendAndConfirmTransaction(connection, tx, [keypair], { commitment: "confirmed" });
+}
+
+/**
+ * Commit the draw slot, then pay the member derived from that slot's hash.
+ * The scheduler does not choose the winner.
+ */
 export async function executeDraw(
   connection: Connection,
   program: Program,
   keypair: Keypair,
-  pool: SchedulerPool,
-  winner: EligibleMember
+  pool: SchedulerPool
 ): Promise<DrawResult> {
   const poolAddress = pool.address;
-  const round = pool.currentRound;
+  const accounts = program.account as any;
 
   try {
-    // Derive PDAs
+    let poolAccount = await accounts.pool.fetch(poolAddress);
+    const round = poolAccount.currentRound as number;
+
+    if (poolAccount.randomnessRound !== round) {
+      const commitTx = await program.methods
+        .commitDrawRandomness()
+        .accounts({
+          caller: keypair.publicKey,
+          pool: poolAddress,
+        })
+        .transaction();
+      await sendSchedulerTx(connection, keypair, commitTx);
+      poolAccount = await accounts.pool.fetch(poolAddress);
+    }
+
+    const committedSlot = BigInt(poolAccount.randomnessSlot.toString());
+    const started = Date.now();
+    let hash: Uint8Array | null = null;
+    while (Date.now() - started < 30_000) {
+      const info = await connection.getAccountInfo(SLOT_HASHES_SYSVAR);
+      hash = info ? readSlotHash(info.data, committedSlot) : null;
+      if (hash) break;
+      await new Promise((resolve) => setTimeout(resolve, 500));
+    }
+    if (!hash) {
+      throw new Error("Committed slot hash was not available");
+    }
+
+    const roster: PublicKey[] = (poolAccount.memberWallets as PublicKey[]).slice(
+      0,
+      poolAccount.rosterLen as number
+    );
+    const memberAccounts: PublicKey[] = [];
+    const eligible: PublicKey[] = [];
+    for (const wallet of roster) {
+      if (wallet.equals(PublicKey.default)) continue;
+      const [memberPDA] = getMemberPDA(poolAddress, wallet);
+      memberAccounts.push(memberPDA);
+      const member = (await accounts.member.fetch(memberPDA)) as OnChainMember;
+      if (
+        isDrawEligible({
+          wallet,
+          hasWon: member.hasWon,
+          inDefault: member.inDefault,
+          isKicked: member.isKicked,
+          inGracePeriod: member.inGracePeriod,
+        })
+      ) {
+        eligible.push(wallet);
+      }
+    }
+
+    const derivedWinner = selectDerivedWinner(hash, eligible);
     const [drawPDA] = getDrawPDA(poolAddress, round);
     const [vaultPDA] = getVaultPDA(poolAddress);
-
-    console.log(`Executing draw for pool ${poolAddress.toBase58()}, round ${round}`);
-    console.log(`Winner: ${winner.wallet.toBase58()}`);
-
-    // Build the transaction
-    const tx = await program.methods
+    const executeTx = await program.methods
       .executeDraw()
       .accounts({
         authority: keypair.publicKey,
         pool: poolAddress,
-        winnerMember: winner.memberPDA,
-        winnerWallet: winner.wallet,
+        winnerWallet: derivedWinner,
         draw: drawPDA,
         vault: vaultPDA,
-        systemProgram: PublicKey.default,
+        systemProgram: SystemProgram.programId,
+        slotHashes: SLOT_HASHES_SYSVAR,
       })
+      .remainingAccounts(
+        memberAccounts.map((pubkey) => ({
+          pubkey,
+          isWritable: true,
+          isSigner: false,
+        }))
+      )
       .transaction();
-
-    // Set recent blockhash and fee payer
-    const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash();
-    tx.recentBlockhash = blockhash;
-    tx.feePayer = keypair.publicKey;
-
-    // Sign and send
-    const signature = await sendAndConfirmTransaction(connection, tx, [keypair], {
-      commitment: "confirmed",
-    });
-
-    console.log(`Draw executed successfully! Signature: ${signature}`);
+    const signature = await sendSchedulerTx(connection, keypair, executeTx);
 
     return {
       poolAddress: poolAddress.toBase58(),
       round,
-      winner: winner.wallet.toBase58(),
+      winner: derivedWinner.toBase58(),
       amount: pool.contributionAmount * pool.memberCount,
       signature,
       success: true,
     };
   } catch (error: any) {
     console.error(`Draw execution failed for pool ${poolAddress.toBase58()}:`, error.message);
-
     return {
       poolAddress: poolAddress.toBase58(),
-      round,
-      winner: winner.wallet.toBase58(),
+      round: pool.currentRound,
+      winner: "",
       amount: 0,
       signature: "",
       success: false,
@@ -387,34 +433,7 @@ export async function processDraws(): Promise<{
     for (const pool of pools) {
       console.log(`\nProcessing pool: ${pool.name} (${pool.address.toBase58()})`);
 
-      // Get eligible members
-      const eligible = await getEligibleMembers(program, pool.address);
-
-      if (eligible.length === 0) {
-        console.log(`No eligible members for pool ${pool.name}, skipping`);
-        results.push({
-          poolAddress: pool.address.toBase58(),
-          round: pool.currentRound,
-          winner: "",
-          amount: 0,
-          signature: "",
-          success: false,
-          error: "No eligible members",
-        });
-        failed++;
-        continue;
-      }
-
-      // Select random winner
-      const winner = selectRandomWinner(eligible);
-      if (!winner) {
-        console.log(`Failed to select winner for pool ${pool.name}`);
-        failed++;
-        continue;
-      }
-
-      // Execute draw
-      const result = await executeDraw(connection, program, keypair, pool, winner);
+      const result = await executeDraw(connection, program, keypair, pool);
       results.push(result);
 
       if (result.success) {

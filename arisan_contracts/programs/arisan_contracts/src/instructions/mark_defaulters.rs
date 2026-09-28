@@ -1,37 +1,24 @@
 use anchor_lang::prelude::*;
 
-use crate::state::{Pool, Member, PoolStatus};
 use crate::errors::ArisanError;
+use crate::state::{Member, Payment, Pool, PoolStatus};
 
-/// Mark Defaulters Instruction
+/// Mark one member who missed the current round.
 ///
-/// Checks a single member and marks them as a defaulter if they missed payment.
-/// This instruction is called for each member individually.
-///
-/// Logic:
-/// 1. If member hasn't paid for current round AND not already in grace AND not kicked:
-///    - If stake_enabled: slash their stake to the vault
-///    - Set in_grace_period = true, grace_deadline = now + 48h
-/// 2. If member is in grace period AND past deadline:
-///    - Set is_kicked = true
-///    - Decrement pool.member_count
-///    - Increment missed_rounds
-///
-/// This can be called by anyone (permissionless), allowing automation via Clockwork.
+/// `payment` is the canonical Payment PDA for `(pool, member, current_round)`.
+/// If that account exists, the member has paid and cannot be slashed.
+/// The caller does not pass a paid/unpaid flag.
 #[derive(Accounts)]
 pub struct MarkDefaulter<'info> {
-    /// Caller - anyone can call this (permissionless for automation)
     #[account(mut)]
     pub caller: Signer<'info>,
 
-    /// The pool (must be Active)
     #[account(
         mut,
         constraint = pool.status == PoolStatus::Active @ ArisanError::PoolNotActive,
     )]
     pub pool: Account<'info, Pool>,
 
-    /// Member account to check for default
     #[account(
         mut,
         seeds = [Member::SEED_PREFIX, pool.key().as_ref(), member.wallet.as_ref()],
@@ -40,8 +27,20 @@ pub struct MarkDefaulter<'info> {
     )]
     pub member: Account<'info, Member>,
 
-    /// SOL Vault - receives slashed stake (if applicable)
-    /// CHECK: This is a PDA we control, validated by seeds
+    /// CHECK: Payment PDA for this member and the current round.
+    /// Empty when the member has not paid. Seeds bind the address.
+    #[account(
+        seeds = [
+            Payment::SEED_PREFIX,
+            pool.key().as_ref(),
+            member.wallet.as_ref(),
+            &[pool.current_round],
+        ],
+        bump,
+    )]
+    pub payment: UncheckedAccount<'info>,
+
+    /// CHECK: Vault PDA, validated by seeds.
     #[account(
         mut,
         seeds = [Pool::VAULT_SEED_PREFIX, pool.key().as_ref()],
@@ -52,19 +51,21 @@ pub struct MarkDefaulter<'info> {
     pub system_program: Program<'info, System>,
 }
 
-/// Handler for mark_defaulter instruction
-pub fn handler(ctx: Context<MarkDefaulter>, has_paid: bool) -> Result<()> {
+pub fn handler(ctx: Context<MarkDefaulter>) -> Result<()> {
+    let clock = Clock::get()?;
+    let has_paid = payment_exists(&ctx.accounts.payment)?;
+
+    if has_paid {
+        return err!(ArisanError::MemberAlreadyPaid);
+    }
+
     let pool = &mut ctx.accounts.pool;
     let member = &mut ctx.accounts.member;
-    let clock = Clock::get()?;
 
-    // Skip if member is already kicked
     if member.is_kicked {
-        msg!("Member {} is already kicked, skipping", member.wallet);
         return Ok(());
     }
 
-    // Check if member is in grace period and past deadline - kick them
     if member.in_grace_period && clock.unix_timestamp > member.grace_deadline {
         member.is_kicked = true;
         member.missed_rounds = member.missed_rounds.checked_add(1).unwrap_or(255);
@@ -76,14 +77,15 @@ pub fn handler(ctx: Context<MarkDefaulter>, has_paid: bool) -> Result<()> {
             reason: "Grace period expired".to_string(),
             missed_rounds: member.missed_rounds,
         });
-
-        msg!("Member {} kicked - grace period expired", member.wallet);
         return Ok(());
     }
 
-    // If member hasn't paid and is not in grace period, mark as defaulter
-    if !has_paid && !member.in_grace_period {
-        // If stake enabled, slash the stake
+    if !member.in_grace_period {
+        require!(
+            clock.unix_timestamp > pool.next_draw_timestamp,
+            ArisanError::RoundNotDue
+        );
+
         if pool.stake_enabled && member.stake_deposited {
             member.stake_deposited = false;
             member.stake_amount = 0;
@@ -94,13 +96,11 @@ pub fn handler(ctx: Context<MarkDefaulter>, has_paid: bool) -> Result<()> {
                 member: member.wallet,
                 round: pool.current_round,
             });
-
-            msg!("Member {} stake slashed for round {}", member.wallet, pool.current_round);
         }
 
-        // Set grace period (48 hours to recover)
         member.in_grace_period = true;
-        member.grace_deadline = clock.unix_timestamp
+        member.grace_deadline = clock
+            .unix_timestamp
             .checked_add(pool.grace_period_seconds)
             .ok_or(ArisanError::Overflow)?;
 
@@ -110,14 +110,25 @@ pub fn handler(ctx: Context<MarkDefaulter>, has_paid: bool) -> Result<()> {
             deadline: member.grace_deadline,
             stake_slashed: pool.stake_enabled && member.in_default,
         });
-
-        msg!("Member {} entered grace period until {}", member.wallet, member.grace_deadline);
     }
 
     Ok(())
 }
 
-/// Event emitted when a member's stake is slashed
+fn payment_exists(payment: &AccountInfo) -> Result<bool> {
+    if payment.data_is_empty() {
+        return Ok(false);
+    }
+    require!(
+        payment.owner == &crate::ID,
+        ArisanError::InvalidPaymentAccount
+    );
+    let data = payment.try_borrow_data()?;
+    let mut slice: &[u8] = &data;
+    Payment::try_deserialize(&mut slice).map_err(|_| error!(ArisanError::InvalidPaymentAccount))?;
+    Ok(true)
+}
+
 #[event]
 pub struct StakeSlashed {
     pub pool: Pubkey,
@@ -125,7 +136,6 @@ pub struct StakeSlashed {
     pub round: u8,
 }
 
-/// Event emitted when a member enters grace period
 #[event]
 pub struct GracePeriodStarted {
     pub pool: Pubkey,
@@ -134,7 +144,6 @@ pub struct GracePeriodStarted {
     pub stake_slashed: bool,
 }
 
-/// Event emitted when a member is kicked
 #[event]
 pub struct MemberKicked {
     pub pool: Pubkey,

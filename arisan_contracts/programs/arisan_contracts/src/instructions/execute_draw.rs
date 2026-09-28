@@ -1,55 +1,48 @@
 use anchor_lang::prelude::*;
+use anchor_lang::solana_program::sysvar::slot_hashes;
 use anchor_lang::solana_program::{program::invoke_signed, system_instruction};
 
-use crate::state::{Pool, Member, Draw, PoolStatus};
+use crate::draw_randomness::{self, MAX_SLOT_HASH_AGE};
 use crate::errors::ArisanError;
+use crate::state::{Draw, Member, Pool, PoolStatus};
 
-/// Execute Draw Instruction
+/// Commit the landing slot for this round's draw.
 ///
-/// Selects a winner for the current round and AUTO-PAYS them immediately.
-/// Can be triggered by pool authority OR anyone after the deadline (for Clockwork automation).
+/// The hash of `clock.slot` is not in SlotHashes until a later slot, so the
+/// signer cannot know the winner when this transaction is built.
+#[derive(Accounts)]
+pub struct CommitDrawRandomness<'info> {
+    #[account(mut)]
+    pub caller: Signer<'info>,
+
+    #[account(
+        mut,
+        constraint = pool.status == PoolStatus::Active @ ArisanError::PoolNotActive,
+    )]
+    pub pool: Account<'info, Pool>,
+}
+
+/// Execute the committed draw and pay the derived winner.
 ///
-/// IMPORTANT: For devnet, this uses pseudo-randomness (slot hash).
-/// For mainnet, integrate Switchboard VRF for true verifiable randomness.
-///
-/// Key concepts for Solidity devs:
-/// - Winner gets paid automatically in this transaction (no separate claim needed)
-/// - Pool authority can execute anytime, anyone can execute after deadline
-/// - Round advances automatically after winner is paid
+/// `winner_wallet` is checked against the member selected from the slot hash.
+/// Passing any other wallet fails. Remaining accounts must be the full roster
+/// of member PDAs; their order is not an input to selection.
 #[derive(Accounts)]
 pub struct ExecuteDraw<'info> {
-    /// Pool authority OR anyone after deadline (for Clockwork automation)
+    /// Pool authority, or anyone after the draw deadline.
     #[account(mut)]
     pub authority: Signer<'info>,
 
-    /// The pool (must be Active)
-    /// Authority check: pool.authority can execute anytime, anyone can execute after deadline
     #[account(
         mut,
         constraint = pool.status == PoolStatus::Active @ ArisanError::PoolNotActive,
     )]
     pub pool: Account<'info, Pool>,
 
-    /// Winner's Member account - must be verified as eligible
-    /// (hasn't won yet, is a member, not in default, not kicked, not in grace period)
-    #[account(
-        mut,
-        seeds = [Member::SEED_PREFIX, pool.key().as_ref(), winner_wallet.key().as_ref()],
-        bump = winner_member.bump,
-        constraint = winner_member.pool == pool.key() @ ArisanError::NotMember,
-        constraint = !winner_member.has_won @ ArisanError::AlreadyWon,
-        constraint = !winner_member.in_default @ ArisanError::MemberInDefault,
-        constraint = !winner_member.is_kicked @ ArisanError::MemberKicked,
-        constraint = !winner_member.in_grace_period @ ArisanError::MemberInGracePeriod,
-    )]
-    pub winner_member: Account<'info, Member>,
-
-    /// Winner's wallet - receives winnings automatically (must be mutable)
-    /// CHECK: Validated by PDA derivation with winner_member
+    /// CHECK: Must be the wallet derived from the committed slot hash.
     #[account(mut)]
     pub winner_wallet: UncheckedAccount<'info>,
 
-    /// Draw record - created for this round
     #[account(
         init,
         payer = authority,
@@ -59,8 +52,7 @@ pub struct ExecuteDraw<'info> {
     )]
     pub draw: Account<'info, Draw>,
 
-    /// SOL Vault - holds the winnings to transfer
-    /// CHECK: This is a PDA we control, validated by seeds
+    /// CHECK: Vault PDA, validated by seeds.
     #[account(
         mut,
         seeds = [Pool::VAULT_SEED_PREFIX, pool.key().as_ref()],
@@ -68,155 +60,265 @@ pub struct ExecuteDraw<'info> {
     )]
     pub vault: SystemAccount<'info>,
 
-    /// System program
     pub system_program: Program<'info, System>,
+
+    /// CHECK: SlotHashes sysvar. Address is constrained.
+    #[account(address = slot_hashes::ID)]
+    pub slot_hashes: UncheckedAccount<'info>,
 }
 
-/// Handler for execute_draw instruction with AUTO-PAY
-///
-/// The authority passes in the selected winner. In production:
-/// 1. VRF request is made to Switchboard
-/// 2. VRF callback provides randomness
-/// 3. Winner is selected deterministically from randomness
-///
-/// For devnet: We generate pseudo-randomness and verify the winner is eligible
-/// Winner is paid automatically in this transaction (no separate claim needed)
-pub fn handler(ctx: Context<ExecuteDraw>) -> Result<()> {
+pub fn commit_handler(ctx: Context<CommitDrawRandomness>) -> Result<()> {
     let pool = &mut ctx.accounts.pool;
-    let winner_member = &mut ctx.accounts.winner_member;
-    let draw = &mut ctx.accounts.draw;
     let clock = Clock::get()?;
 
-    // Permission check: pool authority can execute anytime, anyone can execute after deadline
-    let is_authority = pool.authority == ctx.accounts.authority.key();
+    let is_authority = pool.authority == ctx.accounts.caller.key();
     let is_past_deadline = clock.unix_timestamp > pool.next_draw_timestamp;
-
+    require!(is_authority || is_past_deadline, ArisanError::Unauthorized);
+    require!(pool.current_round >= 1, ArisanError::DrawNotReady);
     require!(
-        is_authority || is_past_deadline,
-        ArisanError::Unauthorized
+        pool.randomness_round != pool.current_round,
+        ArisanError::RandomnessAlreadyCommitted
     );
 
-    // Generate pseudo-random seed (for devnet testing)
-    // In production, this would come from Switchboard VRF
-    let vrf_result = generate_pseudo_random(
-        &pool.key(),
-        pool.current_round,
-        clock.slot,
-        clock.unix_timestamp,
+    pool.randomness_slot = clock.slot;
+    pool.randomness_round = pool.current_round;
+
+    emit!(DrawRandomnessCommitted {
+        pool: pool.key(),
+        round: pool.current_round,
+        slot: pool.randomness_slot,
+    });
+
+    Ok(())
+}
+
+pub fn handler(ctx: Context<ExecuteDraw>) -> Result<()> {
+    let clock = Clock::get()?;
+
+    let (pool_key, winner_key, vrf_result, winnings, current_round, vault_bump) = {
+        let pool = &ctx.accounts.pool;
+
+        let is_authority = pool.authority == ctx.accounts.authority.key();
+        let is_past_deadline = clock.unix_timestamp > pool.next_draw_timestamp;
+        require!(is_authority || is_past_deadline, ArisanError::Unauthorized);
+        require!(
+            pool.randomness_round == pool.current_round,
+            ArisanError::RandomnessNotCommitted
+        );
+        require!(
+            clock.slot > pool.randomness_slot,
+            ArisanError::RandomnessNotReady
+        );
+
+        let slot_hash_data = ctx.accounts.slot_hashes.try_borrow_data()?;
+        let vrf_result = match draw_randomness::read_slot_hash(&slot_hash_data, pool.randomness_slot)
+        {
+            Some(hash) => hash,
+            None if clock.slot > pool.randomness_slot.saturating_add(MAX_SLOT_HASH_AGE) => {
+                return err!(ArisanError::RandomnessExpired);
+            }
+            None => return err!(ArisanError::RandomnessNotReady),
+        };
+        drop(slot_hash_data);
+
+        let pool_key = pool.key();
+        let mut eligible = load_eligible_wallets(pool, &pool_key, &ctx.remaining_accounts)?;
+        let winner_key = draw_randomness::select_winner(&vrf_result, &mut eligible)
+            .ok_or(ArisanError::NoEligibleMembers)?;
+
+        let winnings = pool
+            .contribution_amount
+            .checked_mul(pool.member_count as u64)
+            .ok_or(ArisanError::Overflow)?;
+
+        (
+            pool_key,
+            winner_key,
+            vrf_result,
+            winnings,
+            pool.current_round,
+            pool.vault_bump,
+        )
+    };
+
+    require_keys_eq!(
+        ctx.accounts.winner_wallet.key(),
+        winner_key,
+        ArisanError::WinnerMismatch
+    );
+    require_keys_neq!(
+        ctx.accounts.winner_wallet.key(),
+        ctx.accounts.vault.key(),
+        ArisanError::WinnerMismatch
     );
 
-    // Calculate winnings: contribution * member_count
-    let winnings = pool.contribution_amount
-        .checked_mul(pool.member_count as u64)
-        .ok_or(ArisanError::Overflow)?;
+    let (winner_pda, _) = Pubkey::find_program_address(
+        &[
+            Member::SEED_PREFIX,
+            pool_key.as_ref(),
+            winner_key.as_ref(),
+        ],
+        &crate::ID,
+    );
+    let winner_info = ctx
+        .remaining_accounts
+        .iter()
+        .find(|account| account.key() == winner_pda)
+        .ok_or(ArisanError::InvalidMemberSet)?;
+    mark_winner(winner_info, current_round)?;
 
-    // Initialize draw record
-    let current_round = pool.current_round;
-    draw.pool = pool.key();
+    let draw = &mut ctx.accounts.draw;
+    draw.pool = pool_key;
     draw.round = current_round;
-    draw.winner = ctx.accounts.winner_wallet.key();
+    draw.winner = winner_key;
     draw.amount = winnings;
     draw.vrf_result = vrf_result;
     draw.drawn_at = clock.unix_timestamp;
     draw.bump = ctx.bumps.draw;
+    draw.claimed = true;
 
-    // Update winner's member record
-    winner_member.has_won = true;
-    winner_member.won_round = current_round;
-
-    // ========== AUTO-PAY: Transfer winnings to winner ==========
-    let pool_key = pool.key();
     let vault_seeds: &[&[u8]] = &[
         Pool::VAULT_SEED_PREFIX,
         pool_key.as_ref(),
-        &[pool.vault_bump],
+        &[vault_bump],
     ];
-    let signer_seeds = &[vault_seeds];
-
-    let transfer_ix = system_instruction::transfer(
-        &ctx.accounts.vault.key(),
-        &ctx.accounts.winner_wallet.key(),
-        winnings,
-    );
-
     invoke_signed(
-        &transfer_ix,
+        &system_instruction::transfer(
+            &ctx.accounts.vault.key(),
+            &winner_key,
+            winnings,
+        ),
         &[
             ctx.accounts.vault.to_account_info(),
             ctx.accounts.winner_wallet.to_account_info(),
             ctx.accounts.system_program.to_account_info(),
         ],
-        signer_seeds,
+        &[vault_seeds],
     )?;
 
-    // Mark as claimed (auto-paid)
-    draw.claimed = true;
+    let pool = &mut ctx.accounts.pool;
+    let pool_completed = advance_round(pool, clock.unix_timestamp)?;
 
-    // ========== ROUND ADVANCEMENT (moved from claim_winnings) ==========
-    let pool_completed: bool;
-    if pool.current_round < pool.total_rounds {
-        pool.current_round = pool.current_round.checked_add(1)
-            .ok_or(ArisanError::Overflow)?;
-
-        // Set next draw timestamp
-        // DEVNET: 5 minutes for testing | MAINNET: Change to 2_592_000 (30 days)
-        const DRAW_INTERVAL: i64 = 300; // 5 minutes
-        pool.next_draw_timestamp = clock.unix_timestamp.checked_add(DRAW_INTERVAL)
-            .ok_or(ArisanError::Overflow)?;
-
-        pool_completed = false;
-    } else {
-        // Final round - pool is complete
-        pool.status = PoolStatus::Completed;
-        pool_completed = true;
-    }
-
-    // Emit event
     emit!(DrawExecutedAndPaid {
         pool: pool_key,
         round: current_round,
-        winner: ctx.accounts.winner_wallet.key(),
+        winner: winner_key,
         amount: winnings,
         vrf_result,
         next_round: pool.current_round,
         pool_completed,
     });
 
-    msg!("Draw executed and paid for round {}. Winner: {} Amount: {} Next round: {}",
-        current_round,
-        ctx.accounts.winner_wallet.key(),
-        winnings,
-        pool.current_round
-    );
-
     Ok(())
 }
 
-/// Generate pseudo-random bytes for devnet testing
-/// NOT SECURE - do not use on mainnet
-fn generate_pseudo_random(
-    pool: &Pubkey,
-    round: u8,
-    slot: u64,
-    timestamp: i64,
-) -> [u8; 32] {
-    let mut result = [0u8; 32];
-    let pool_bytes = pool.to_bytes();
-    let slot_bytes = slot.to_le_bytes();
-    let ts_bytes = timestamp.to_le_bytes();
-
-    // Mix inputs
-    for i in 0..32 {
-        result[i] = pool_bytes[i]
-            ^ slot_bytes[i % 8]
-            ^ ts_bytes[i % 8]
-            ^ (round.wrapping_mul(17));
+fn advance_round(pool: &mut Pool, now: i64) -> Result<bool> {
+    if pool.current_round < pool.total_rounds {
+        pool.current_round = pool
+            .current_round
+            .checked_add(1)
+            .ok_or(ArisanError::Overflow)?;
+        // DEVNET: 5 minutes. MAINNET: 2_592_000 (30 days).
+        const DRAW_INTERVAL: i64 = 300;
+        pool.next_draw_timestamp = now
+            .checked_add(DRAW_INTERVAL)
+            .ok_or(ArisanError::Overflow)?;
+        // The previous commit must not authorize the next round.
+        pool.randomness_round = 0;
+        pool.randomness_slot = 0;
+        Ok(false)
+    } else {
+        pool.status = PoolStatus::Completed;
+        pool.randomness_round = 0;
+        pool.randomness_slot = 0;
+        Ok(true)
     }
-
-    result
 }
 
-/// Event emitted when a draw is executed and winner is paid
+/// Every roster wallet must be present exactly once. Eligible wallets are
+/// those still able to win this round.
+fn load_eligible_wallets(
+    pool: &Pool,
+    pool_key: &Pubkey,
+    remaining: &[AccountInfo],
+) -> Result<Vec<Pubkey>> {
+    let roster_len = pool.roster_len as usize;
+    require!(roster_len > 0, ArisanError::NoEligibleMembers);
+    require!(
+        remaining.len() == roster_len,
+        ArisanError::InvalidMemberSet
+    );
+
+    let mut seen = [false; 20];
+    let mut eligible = Vec::with_capacity(roster_len);
+
+    for info in remaining {
+        require!(
+            info.owner == &crate::ID,
+            ArisanError::InvalidMemberSet
+        );
+        let data = info.try_borrow_data()?;
+        let mut slice: &[u8] = &data;
+        let member = Member::try_deserialize(&mut slice)
+            .map_err(|_| error!(ArisanError::InvalidMemberSet))?;
+        drop(data);
+
+        require!(member.pool == *pool_key, ArisanError::NotMember);
+
+        let idx = pool.member_wallets[..roster_len]
+            .iter()
+            .position(|wallet| *wallet == member.wallet)
+            .ok_or(ArisanError::InvalidMemberSet)?;
+        require!(!seen[idx], ArisanError::InvalidMemberSet);
+        seen[idx] = true;
+
+        let (pda, _) = Pubkey::find_program_address(
+            &[
+                Member::SEED_PREFIX,
+                pool_key.as_ref(),
+                member.wallet.as_ref(),
+            ],
+            &crate::ID,
+        );
+        require_keys_eq!(info.key(), pda, ArisanError::InvalidMemberSet);
+
+        let can_win = !member.has_won
+            && !member.in_default
+            && !member.is_kicked
+            && !member.in_grace_period;
+        if can_win {
+            eligible.push(member.wallet);
+        }
+    }
+
+    require!(
+        seen[..roster_len].iter().all(|present| *present),
+        ArisanError::InvalidMemberSet
+    );
+
+    Ok(eligible)
+}
+
+fn mark_winner(info: &AccountInfo, round: u8) -> Result<()> {
+    let mut data = info.try_borrow_mut_data()?;
+    let mut member = {
+        let mut slice: &[u8] = &data;
+        Member::try_deserialize(&mut slice).map_err(|_| error!(ArisanError::InvalidMemberSet))?
+    };
+    member.has_won = true;
+    member.won_round = round;
+    let mut cursor = &mut data[..];
+    member.try_serialize(&mut cursor)?;
+    Ok(())
+}
+
+#[event]
+pub struct DrawRandomnessCommitted {
+    pub pool: Pubkey,
+    pub round: u8,
+    pub slot: u64,
+}
+
 #[event]
 pub struct DrawExecutedAndPaid {
     pub pool: Pubkey,
