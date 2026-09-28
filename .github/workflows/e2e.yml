@@ -24,7 +24,7 @@ jobs:
           workspaces: arisan_contracts
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 24
       - run: npm run test:security 2>&1 | tee security_p0.log
         shell: bash
       - uses: actions/upload-artifact@v4
@@ -41,7 +41,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 24
           cache: npm
       - run: npm ci
       - run: npx playwright install --with-deps chromium
