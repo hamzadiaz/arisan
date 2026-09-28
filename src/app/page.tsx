@@ -100,7 +100,7 @@ function MyPools() {
       {nextDue && (
         <Link href={`/pools/${nextDue.id}`} className="block">
           <div className="mb-6 rounded-3xl bg-gradient-to-br from-emerald-500 to-emerald-700 p-5 text-white shadow-xl shadow-emerald-900/20">
-            <p className="text-sm font-medium text-emerald-100">Next payment · {nextDue.name}</p>
+            <p className="text-sm font-medium text-emerald-100">Next draw · {nextDue.name}</p>
             <p className="mt-1 text-4xl font-bold tracking-tight">
               {formatAmount(nextDue.monthlyAmount, nextDue.currency)}
             </p>
@@ -109,7 +109,7 @@ function MyPools() {
                 Round {nextDue.currentRound} of {nextDue.durationMonths}
               </span>
               <span className="font-medium">
-                {timeUntil(nextDue.nextDrawDate) ? `Draw in ${timeUntil(nextDue.nextDrawDate)}` : "Draw due"}
+                {timeUntil(nextDue.nextDrawDate) ? `In ${timeUntil(nextDue.nextDrawDate)}` : "Due now"}
               </span>
             </div>
           </div>
