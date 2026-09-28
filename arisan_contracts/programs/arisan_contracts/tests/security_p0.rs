@@ -2,7 +2,7 @@
 
 use anchor_lang::{AccountDeserialize, InstructionData, ToAccountMetas};
 use arisan_contracts::draw_randomness::{read_slot_hash, select_winner};
-use arisan_contracts::state::{Draw, Member, Pool};
+use arisan_contracts::state::{Draw, Member, Payment, Pool, PoolStatus};
 use solana_program_test::*;
 use solana_sdk::{
     account::Account,
@@ -173,23 +173,41 @@ async fn create_pool(
         .expect("create_pool return data");
     let invite = String::from_utf8(invite_bytes).unwrap();
     assert_eq!(invite.len(), 8, "invite code is 8 chars");
-    for line in result.metadata.unwrap().log_messages {
-        if line.starts_with("Program log:") {
-            assert!(
-                !line.contains(&invite),
-                "invite plaintext leaked into program log: {line}"
-            );
-        }
-    }
+    assert_invite_not_logged(&result, &invite);
     PoolFixture { pool, vault, invite }
 }
 
-async fn join(context: &mut ProgramTestContext, fixture: &PoolFixture, user: &Keypair) {
-    let member = pda(&[b"member", fixture.pool.as_ref(), user.pubkey().as_ref()]);
-    let ix = Instruction {
+/// The invite code must only travel in return data: not in any log line, and not
+/// inside an Anchor event (`Program data:` lines are base64 Borsh payloads). With the
+/// native processor, ProgramTest prints `sol_log_data` to stdout instead of recording
+/// it, so events are decoded here only when the program runs as BPF.
+fn assert_invite_not_logged(result: &BanksTransactionResultWithMetadata, invite: &str) {
+    use anchor_lang::__private::base64::{engine::general_purpose::STANDARD, Engine};
+
+    let lines = &result.metadata.as_ref().expect("metadata").log_messages;
+    for line in lines {
+        assert!(
+            !line.contains(invite),
+            "invite plaintext leaked into program logs: {line}"
+        );
+        if let Some(encoded) = line.strip_prefix("Program data: ") {
+            for chunk in encoded.split_whitespace() {
+                let bytes = STANDARD.decode(chunk).expect("event payload is base64");
+                assert!(
+                    !bytes.windows(invite.len()).any(|w| w == invite.as_bytes()),
+                    "invite plaintext leaked into an emitted event: {line}"
+                );
+            }
+        }
+    }
+}
+
+fn join_ix(fixture: &PoolFixture, user: Pubkey, invite_code: &str) -> Instruction {
+    let member = pda(&[b"member", fixture.pool.as_ref(), user.as_ref()]);
+    Instruction {
         program_id: arisan_contracts::ID,
         accounts: arisan_contracts::accounts::JoinPool {
-            user: user.pubkey(),
+            user,
             pool: fixture.pool,
             member,
             vault: fixture.vault,
@@ -197,10 +215,14 @@ async fn join(context: &mut ProgramTestContext, fixture: &PoolFixture, user: &Ke
         }
         .to_account_metas(None),
         data: arisan_contracts::instruction::JoinPool {
-            invite_code: fixture.invite.clone(),
+            invite_code: invite_code.to_string(),
         }
         .data(),
-    };
+    }
+}
+
+async fn join(context: &mut ProgramTestContext, fixture: &PoolFixture, user: &Keypair) {
+    let ix = join_ix(fixture, user.pubkey(), &fixture.invite);
     let result = if user.pubkey() == context.payer.pubkey() {
         send(context, &[ix], &[]).await
     } else {
@@ -534,4 +556,141 @@ async fn paid_member_cannot_be_defaulted_and_unpaid_only_after_deadline() {
     assert_eq!(unpaid.stake_amount, 0);
     assert!(unpaid.in_default);
     assert!(unpaid.in_grace_period);
+}
+
+fn load_payment(data: &[u8]) -> Payment {
+    let mut slice = data;
+    Payment::try_deserialize(&mut slice).unwrap()
+}
+
+#[tokio::test]
+async fn join_requires_the_hashed_invite_code() {
+    let member2 = Keypair::new();
+    let mut test = program_test();
+    test.add_account(
+        member2.pubkey(),
+        Account::new(2_000_000_000, 0, &system_program::id()),
+    );
+    let mut context = test.start_with_context().await;
+
+    let fixture = create_pool(&mut context, 3, false).await;
+    let pool = load_pool(&account_data(&mut context, fixture.pool).await);
+    assert_eq!(
+        pool.invite_code_hash,
+        anchor_lang::solana_program::hash::hash(fixture.invite.as_bytes()).to_bytes(),
+        "pool stores the SHA-256 of the invite, not the plaintext"
+    );
+    let raw = account_data(&mut context, fixture.pool).await;
+    assert!(
+        !raw.windows(fixture.invite.len()).any(|w| w == fixture.invite.as_bytes()),
+        "invite plaintext must not be stored in the pool account"
+    );
+
+    let member_pda = pda(&[b"member", fixture.pool.as_ref(), member2.pubkey().as_ref()]);
+    let mut wrong_codes = vec!["WRONG123".to_string(), fixture.invite.to_lowercase()];
+    wrong_codes.retain(|code| code != &fixture.invite);
+    for code in wrong_codes {
+        let ix = join_ix(&fixture, member2.pubkey(), &code);
+        assert_logs_contain(&send(&mut context, &[ix], &[&member2]).await, "Invalid invite code");
+        assert!(
+            context.banks_client.get_account(member_pda).await.unwrap().is_none(),
+            "rejected join must not create a member account"
+        );
+    }
+    assert_eq!(load_pool(&account_data(&mut context, fixture.pool).await).member_count, 0);
+
+    join(&mut context, &fixture, &member2).await;
+    let pool = load_pool(&account_data(&mut context, fixture.pool).await);
+    assert_eq!(pool.member_count, 1);
+    assert_eq!(pool.member_wallets[0], member2.pubkey());
+    let member = load_member(&account_data(&mut context, member_pda).await);
+    assert_eq!(member.wallet, member2.pubkey());
+    assert_eq!(member.position, 1);
+}
+
+#[tokio::test]
+async fn program_flow_create_join_stake_start_pay_draw() {
+    let member2 = Keypair::new();
+    let mut test = program_test();
+    test.add_account(
+        member2.pubkey(),
+        Account::new(2_000_000_000, 0, &system_program::id()),
+    );
+    let mut context = test.start_with_context().await;
+    let payer = context.payer.insecure_clone();
+
+    // Create
+    let fixture = create_pool(&mut context, 2, true).await;
+    let pool = load_pool(&account_data(&mut context, fixture.pool).await);
+    assert!(pool.status == PoolStatus::Pending);
+    assert_eq!(pool.authority, payer.pubkey());
+    assert_eq!(pool.contribution_amount, CONTRIB);
+    assert_eq!(pool.max_members, 2);
+    assert!(pool.stake_enabled);
+
+    // Join
+    join(&mut context, &fixture, &payer).await;
+    join(&mut context, &fixture, &member2).await;
+    assert_eq!(load_pool(&account_data(&mut context, fixture.pool).await).member_count, 2);
+
+    // Deposit stake
+    let vault_start = lamports(&mut context, fixture.vault).await;
+    deposit_stake(&mut context, &fixture, &payer).await;
+    deposit_stake(&mut context, &fixture, &member2).await;
+    let vault_staked = lamports(&mut context, fixture.vault).await;
+    assert_eq!(vault_staked - vault_start, CONTRIB * 2, "stake is 1x contribution per member");
+
+    // Start
+    start_pool(&mut context, &fixture).await;
+    let pool = load_pool(&account_data(&mut context, fixture.pool).await);
+    assert!(pool.status == PoolStatus::Active);
+    assert_eq!(pool.current_round, 1);
+    assert!(pool.next_draw_timestamp > 0);
+
+    // Pay
+    pay(&mut context, &fixture, &payer, 1).await;
+    pay(&mut context, &fixture, &member2, 1).await;
+    let vault_paid = lamports(&mut context, fixture.vault).await;
+    assert_eq!(vault_paid - vault_staked, CONTRIB * 2, "both round-1 payments reach the vault");
+    for wallet in [payer.pubkey(), member2.pubkey()] {
+        let payment = load_payment(
+            &account_data(
+                &mut context,
+                pda(&[b"payment", fixture.pool.as_ref(), wallet.as_ref(), &[1]]),
+            )
+            .await,
+        );
+        assert_eq!(payment.round, 1);
+        assert_eq!(payment.amount, CONTRIB);
+        let member = load_member(
+            &account_data(&mut context, pda(&[b"member", fixture.pool.as_ref(), wallet.as_ref()])).await,
+        );
+        assert_eq!(member.payments_made, 1);
+    }
+
+    // Draw: the derived winner receives contribution * member_count; stakes stay in the vault.
+    context.warp_to_slot(20).unwrap();
+    let committed_slot = commit(&mut context, &fixture).await;
+    context.warp_to_slot(committed_slot + 3).unwrap();
+    let slot_hash_account = account_data(&mut context, slot_hashes::id()).await;
+    let hash = read_slot_hash(&slot_hash_account, committed_slot).unwrap();
+    let mut eligible = [payer.pubkey(), member2.pubkey()];
+    let derived = select_winner(&hash, &mut eligible).unwrap();
+    let member_pdas = [
+        pda(&[b"member", fixture.pool.as_ref(), payer.pubkey().as_ref()]),
+        pda(&[b"member", fixture.pool.as_ref(), member2.pubkey().as_ref()]),
+    ];
+    let winner_before = lamports(&mut context, derived).await;
+    let ix = execute_ix(&fixture, payer.pubkey(), derived, 1, &member_pdas);
+    assert_ok(&send(&mut context, &[ix], &[]).await, "execute_draw");
+
+    let vault_after = lamports(&mut context, fixture.vault).await;
+    assert_eq!(vault_paid - vault_after, CONTRIB * 2);
+    assert_eq!(vault_after - vault_start, CONTRIB * 2, "stakes remain escrowed after the draw");
+    if derived != payer.pubkey() {
+        assert_eq!(lamports(&mut context, derived).await - winner_before, CONTRIB * 2);
+    }
+    let draw = load_draw(&account_data(&mut context, pda(&[b"draw", fixture.pool.as_ref(), &[1]])).await);
+    assert_eq!(draw.winner, derived);
+    assert_eq!(draw.amount, CONTRIB * 2);
 }
