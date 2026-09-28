@@ -39,9 +39,9 @@ test("the invite code is shown once, copies, and opens the pool (E2E-13)", async
   await createPool(page);
 
   await expect(page.locator("header h1")).toHaveText("Pool created", { timeout: 20_000 });
-  await expect(page.getByRole("heading", { name: "Office lunch is live" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Office lunch" })).toBeVisible();
   await expect(page.getByText("Q7K2M9XA")).toBeVisible();
-  await expect(page.getByText("Shown once.")).toBeVisible();
+  await expect(page.getByText("Shown once. Save it now.")).toBeVisible();
   await proof(page, "c-invite-shown-once");
 
   await page.getByText("Q7K2M9XA").click();
@@ -62,7 +62,7 @@ test("if the code never comes back the screen says so, and invents nothing", asy
   await createPool(page);
 
   await expect(page.locator("header h1")).toHaveText("Pool created", { timeout: 40_000 });
-  await expect(page.getByText("could not be read back from the network")).toBeVisible();
+  await expect(page.getByText("Couldn't read the invite code.")).toBeVisible();
   await expect(page.getByText("Shown once.")).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Open pool" })).toBeVisible();
 });
