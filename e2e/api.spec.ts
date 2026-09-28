@@ -22,6 +22,26 @@ test.describe("11-12. Custodial endpoints are gone", () => {
   });
 });
 
+test.describe("Stripe on-ramp is off for CLOCK IN (self-custodial only)", () => {
+  for (const [method, endpoint] of [
+    ["POST", "/api/stripe/checkout"],
+    ["GET", "/api/stripe/checkout?amount=20"],
+    ["POST", "/api/stripe/webhook"],
+  ] as const) {
+    test(`${method} ${endpoint} -> 410`, async ({ request }) => {
+      const res =
+        method === "GET"
+          ? await request.get(endpoint)
+          : await request.post(endpoint, {
+              headers: { Authorization: "Bearer any-token", "stripe-signature": "t=1,v1=forged" },
+              data: { amountUsd: 20, type: "checkout.session.completed" },
+            });
+      expect(res.status()).toBe(410);
+      expect((await res.json()).error).toMatch(/self-custodial/i);
+    });
+  }
+});
+
 test.describe("13. Cron draw requires CRON_SECRET", () => {
   const denied = (status: number) => {
     expect(status).not.toBe(200);
