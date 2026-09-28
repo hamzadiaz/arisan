@@ -48,11 +48,6 @@ export async function expectNoForbiddenCopy(page: Page) {
 
 const PROGRAM_ID = new PublicKey((idl as { address: string }).address);
 const coder = new BorshAccountsCoder(idl as Idl);
-const poolDiscriminator = utils.bytes.bs58.encode(
-  Buffer.from((idl as { accounts: { name: string; discriminator: number[] }[] }).accounts.find(
-    (a) => a.name === "Pool"
-  )!.discriminator)
-);
 
 export const MOCK_POOL = {
   address: new PublicKey("9xQeWvG816bUx9EPjHmaT23yvVM2ZWbrrpZb9PusVFin"),
@@ -63,23 +58,43 @@ export const MOCK_POOL = {
   lamportsPerRound: 500_000_000,
 };
 
-async function encodeMockPool(): Promise<Buffer> {
+export interface MockMember {
+  wallet: PublicKey;
+  stakeDeposited?: boolean;
+  inGracePeriod?: boolean;
+  isKicked?: boolean;
+}
+
+export interface MockScenario {
+  authority?: PublicKey;
+  status?: "Pending" | "Active";
+  currentRound?: number;
+  members?: MockMember[];
+  /** Wallets that have paid the current round */
+  paid?: PublicKey[];
+}
+
+const pda = (seeds: (Buffer | Uint8Array)[]) =>
+  PublicKey.findProgramAddressSync(seeds, PROGRAM_ID)[0];
+
+async function encodeMockPool(scenario: MockScenario): Promise<Buffer> {
   const name = Buffer.alloc(32);
   name.write(MOCK_POOL.name);
-  const wallets = Array.from({ length: 20 }, () => PublicKey.default);
-  wallets[0] = MOCK_POOL.authority;
+  const members = scenario.members ?? [];
+  const wallets = Array.from({ length: 20 }, (_, i) => members[i]?.wallet ?? PublicKey.default);
+  const active = scenario.status === "Active";
   // Field keys follow the IDL (snake_case); the app's Program camel-cases on decode.
   return coder.encode("Pool", {
-    authority: MOCK_POOL.authority,
+    authority: scenario.authority ?? MOCK_POOL.authority,
     name: [...name],
     max_members: MOCK_POOL.maxMembers,
-    member_count: 1,
+    member_count: members.length,
     contribution_amount: new BN(MOCK_POOL.lamportsPerRound),
     currency: { Sol: {} },
     total_rounds: MOCK_POOL.maxMembers,
-    current_round: 0,
-    status: { Pending: {} },
-    next_draw_timestamp: new BN(0),
+    current_round: active ? (scenario.currentRound ?? 1) : 0,
+    status: { [scenario.status ?? "Pending"]: {} },
+    next_draw_timestamp: new BN(active ? Math.floor(Date.now() / 1000) + 3 * 86_400 : 0),
     invite_code_hash: [...createHash("sha256").update(MOCK_POOL.inviteCode).digest()],
     stake_multiplier: 1,
     bump: 255,
@@ -91,38 +106,103 @@ async function encodeMockPool(): Promise<Buffer> {
     grace_period_seconds: new BN(172_800),
     auto_mode: false,
     member_wallets: wallets,
-    roster_len: 1,
+    roster_len: members.length,
     randomness_slot: new BN(0),
     randomness_round: 0,
   });
 }
 
-export async function mockRpcWithPool(page: Page) {
-  const data = await encodeMockPool();
-  const account = {
+/**
+ * Route the app's RPC to an in-page fake chain holding one pool (plus its members and
+ * payments). Accounts are Borsh-encoded from the app's IDL and live at their real PDAs;
+ * getProgramAccounts applies memcmp filters the way an RPC node does.
+ */
+export async function mockRpcWithPool(page: Page, scenario: MockScenario = {}) {
+  const accounts = new Map<string, Buffer>();
+  accounts.set(MOCK_POOL.address.toBase58(), await encodeMockPool(scenario));
+  const round = scenario.status === "Active" ? (scenario.currentRound ?? 1) : 0;
+  for (const [i, m] of (scenario.members ?? []).entries()) {
+    const address = pda([Buffer.from("member"), MOCK_POOL.address.toBuffer(), m.wallet.toBuffer()]);
+    accounts.set(
+      address.toBase58(),
+      await coder.encode("Member", {
+        pool: MOCK_POOL.address,
+        wallet: m.wallet,
+        has_won: false,
+        won_round: 0,
+        stake_deposited: m.stakeDeposited ?? false,
+        stake_amount: new BN(m.stakeDeposited ? MOCK_POOL.lamportsPerRound : 0),
+        payments_made: 0,
+        joined_at: new BN(1_750_000_000 + i),
+        position: i + 1,
+        bump: 255,
+        in_default: m.inGracePeriod ?? false,
+        in_grace_period: m.inGracePeriod ?? false,
+        grace_deadline: new BN(m.inGracePeriod ? Math.floor(Date.now() / 1000) + 86_400 : 0),
+        is_kicked: m.isKicked ?? false,
+        missed_rounds: m.inGracePeriod ? 1 : 0,
+      })
+    );
+  }
+  for (const wallet of scenario.paid ?? []) {
+    const address = pda([
+      Buffer.from("payment"),
+      MOCK_POOL.address.toBuffer(),
+      wallet.toBuffer(),
+      Buffer.from([round]),
+    ]);
+    accounts.set(
+      address.toBase58(),
+      await coder.encode("Payment", {
+        pool: MOCK_POOL.address,
+        member: wallet,
+        round,
+        amount: new BN(MOCK_POOL.lamportsPerRound),
+        paid_at: new BN(1_750_000_100),
+        bump: 255,
+      })
+    );
+  }
+
+  const toAccount = (data: Buffer) => ({
     data: [data.toString("base64"), "base64"],
     executable: false,
     lamports: 10_000_000,
     owner: PROGRAM_ID.toBase58(),
     rentEpoch: 0,
     space: data.length,
-  };
+  });
   const context = { slot: 1, apiVersion: "1.18.26" };
+  const matches = (data: Buffer, filters: { memcmp?: { offset: number; bytes: string } }[]) =>
+    filters.every((f) => {
+      if (!f.memcmp) return true;
+      const want = Buffer.from(utils.bytes.bs58.decode(f.memcmp.bytes));
+      return data.subarray(f.memcmp.offset, f.memcmp.offset + want.length).equals(want);
+    });
 
   const answer = (method: string, params: unknown[]) => {
     switch (method) {
-      case "getAccountInfo":
-        return { context, value: params[0] === MOCK_POOL.address.toBase58() ? account : null };
+      case "getAccountInfo": {
+        const data = accounts.get(params[0] as string);
+        return { context, value: data ? toAccount(data) : null };
+      }
+      case "getMultipleAccounts":
+        return {
+          context,
+          value: (params[0] as string[]).map((k) => {
+            const data = accounts.get(k);
+            return data ? toAccount(data) : null;
+          }),
+        };
       case "getBalance":
         return { context, value: 0 };
       case "getProgramAccounts": {
         const filters = ((params[1] as { filters?: unknown[] })?.filters ?? []) as {
           memcmp?: { offset: number; bytes: string };
         }[];
-        const wantsPools = filters.some(
-          (f) => f.memcmp?.offset === 0 && f.memcmp.bytes === poolDiscriminator
-        );
-        return wantsPools ? [{ pubkey: MOCK_POOL.address.toBase58(), account }] : [];
+        return [...accounts]
+          .filter(([, data]) => matches(data, filters))
+          .map(([pubkey, data]) => ({ pubkey, account: toAccount(data) }));
       }
       case "getLatestBlockhash":
         return { context, value: { blockhash: PublicKey.default.toBase58(), lastValidBlockHeight: 1 } };

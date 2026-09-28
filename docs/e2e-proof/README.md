@@ -5,7 +5,7 @@ Screenshots: [`ui/`](ui/), mobile 390×844, dark colour scheme, Chromium.
 
 ```bash
 npm run test:security   # Anchor: cargo test -p arisan_contracts --test security_p0 (4 tests)
-npm run test:e2e:ui     # Playwright UI + API + header against `next build && next start` (44 tests)
+npm run test:e2e:ui     # Playwright UI + API + header against `next build && next start` (53 tests)
 npm run test:e2e        # both
 ```
 
@@ -82,9 +82,18 @@ Each fix has a regression test.
 | E2E-8 | `solToLamports` used `Math.floor(sol * 1e9)`, so 2,426 of the one-to-three-decimal amounts up to 100 SOL lost a lamport (4.1 SOL was sent as 4,099,999,999). The amount field also accepted `1.2.3` and sub-lamport amounts that the program rejects only after the wallet prompt. | `Math.round`; the amount input allows one decimal point and at most 9 decimals. | transactions › "exact lamports", "one decimal point", "below one lamport" |
 | E2E-9 | The name was capped at 32 JavaScript characters, but the program's limit is 32 UTF-8 bytes. Names with emoji or accents passed the UI and then failed on-chain with `NameTooLong`. | The name is clamped by UTF-8 bytes without splitting a character. | transactions › "UTF-8 name" |
 
+| E2E-10 | A stake pool could be started before every member had staked. On-chain, an unstaked member of a started pool can neither stake nor pay (issue #8), yet the UI showed them a Pay button that was bound to fail. | Start is disabled until everyone has staked ("Waiting for stakes (x/y)"). An unstaked member of an already-started pool sees "payments are blocked". | pool-actions › E2E-10 (2 tests) |
+| E2E-11 | A member slashed into the grace period saw only "Pay", which fails with `StakeNotDeposited`. The UI never offered the restake the program allows, and a removed member still saw Pay. | "Restake to stay in" (`deposit_stake`) for members in grace; removed members see a disabled state. | pool-actions › E2E-11, "removed member" |
+
+`e2e/pool-actions.spec.ts` covers the pool screen's primary action for each member state: visitor, unstaked member, authority waiting or ready to start, pay, paid, grace, unstaked-after-start, and removed. It runs against a fake chain of Pool, Member and Payment accounts at their real PDAs, and asserts which instruction each button asks the wallet to sign.
+
 `e2e/transactions.spec.ts` decodes the `create_pool` / `join_pool` instruction the UI hands to the wallet. The mock wallet records the transaction it was asked to sign, then refuses. So the tests check the exact on-wire arguments, and also that a refused signature leaves the form intact and retryable.
 
 The header's Back button used `history.length`, which counts pages from other sites, so from a deep link it could leave the app. It now falls back to Home unless the user has navigated inside the app.
+
+## Program findings (filed, not fixed)
+
+- [#8](https://github.com/hamzadiaz/arisan/issues/8) `start_pool` does not require stakes, which strands unstaked members. The UI mitigates it (E2E-10); the program fix is open.
 
 ## Remaining gaps (not faked)
 
