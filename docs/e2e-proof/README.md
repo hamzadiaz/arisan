@@ -5,7 +5,7 @@ Screenshots: [`ui/`](ui/), mobile 390×844, dark colour scheme, Chromium.
 
 ```bash
 npm run test:security   # Anchor: cargo test -p arisan_contracts --test security_p0 (4 tests + 2 ignored proofs: P-2, P-3)
-npm run test:e2e:ui     # Playwright UI + API + header against `next build && next start` (59 tests)
+npm run test:e2e:ui     # Playwright UI + API + header against `next build && next start` (60 tests)
 npm run test:e2e        # both
 ```
 
@@ -92,6 +92,9 @@ Each fix has a regression test.
 
 | E2E-14 | The authority could start a pool below capacity ("Start with 2 members" in a 3-seat pool). On-chain, that pool can never complete, so every stake is locked (#13). | Start is only offered once the pool is full ("Waiting for members (x/y)"). | pool-actions › "cannot start below capacity" |
 
+| E2E-15 | In the Android APK (Solana Mobile web shell), `@solana-mobile/wallet-standard-mobile` 0.4.4 refused to register MWA inside a WebView, so the wallet sheet was empty. | Upgraded to 0.6.0, which allows the `Solana Mobile Web Shell` user agent. | webshell › wallet sheet lists MWA |
+| E2E-16 | MWA was registered in a `useEffect` that ran after the wallet provider's registry snapshot and before its subscription, so the registration was lost. Android Chrome masked this with the adapter's own legacy MWA entry. | Register at module load. | webshell › wallet sheet lists MWA (red-checked against the old code) |
+
 `e2e/create-success.spec.ts` runs the full Create success path. The mock wallet sends (`signAndSendTransaction`), the fake chain confirms over a mocked RPC WebSocket, and the invite code comes back only through the transaction's return data. The test checks that the code is shown once and copies, and that "Open pool" goes to the derived pool PDA.
 
 `e2e/pool-actions.spec.ts` covers the pool screen's primary action for each member state: visitor, unstaked member, authority waiting or ready to start, pay, paid, grace, unstaked-after-start, and removed. It runs against a fake chain of Pool, Member and Payment accounts at their real PDAs, and asserts which instruction each button asks the wallet to sign.
@@ -109,7 +112,8 @@ The header's Back button used `history.length`, which counts pages from other si
 
 ## Remaining gaps (not faked)
 
-- **APK / webshell:** not built or tested here. The Mobile Wallet Adapter and Seed Vault handoff needs an Android device or emulator.
+- **APK:** built and proven on an Android emulator with a real MWA wallet and real transactions; see `docs/apk-proof/` and `docs/APK.md`. Still not tested on a Seeker with Seed Vault, and there's no hosted https deployment yet.
+- **Devnet program is outdated:** it predates the security fix, and its upgrade authority `CaJpp31WNCQAZPt11BY13Eqyu1vxPnnJYHDyhXmWwud6` isn't on this machine. Redeploy it before any devnet demo.
 - **Funded-wallet draw on devnet:** not run. On-chain draw and payout correctness is proven in `security_p0` with an in-process bank. A real devnet round needs funded wallets and a deployed program.
 - **Signing from the UI:** the mock wallet refuses to sign. Tests decode the create and join instructions the UI builds. Pay and draw from the UI, and a real signed round trip, are not covered in the browser; they are covered on-chain.
 - **Lint:** `npm run lint` still reports errors that were already on `main` (`no-explicit-any` in `use-solana-program.ts` and the cron route, among others). Lint is not part of the gate.

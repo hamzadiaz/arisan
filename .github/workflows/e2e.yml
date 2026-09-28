@@ -55,3 +55,33 @@ jobs:
             playwright-report/
             test-results/
             docs/e2e-proof/ui/
+
+  apk:
+    name: Android APK (Solana Mobile web shell)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+      # Throwaway signing key per run: CI APKs are for testing. Release builds use the
+      # real keystore (docs/APK.md). ARISAN_WEB_URL comes from the repo variable once a
+      # hosted https deployment exists; until then the APK targets localhost via adb reverse.
+      - name: Build APK
+        shell: bash
+        env:
+          ARISAN_WEB_URL: ${{ vars.ARISAN_WEB_URL || 'http://localhost:3000/' }}
+          ARISAN_KEYSTORE_PATH: ${{ runner.temp }}/ci.jks
+          ARISAN_VERSION_CODE: ${{ github.run_number }}
+        run: |
+          export SOLANA_MOBILE_KEYSTORE_PASSWORD="ci-$(openssl rand -hex 12)"
+          ./scripts/build-apk.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: arisan-clockin-apk
+          path: dist/*.apk
