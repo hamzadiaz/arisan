@@ -694,3 +694,48 @@ async fn program_flow_create_join_stake_start_pay_draw() {
     assert_eq!(draw.winner, derived);
     assert_eq!(draw.amount, CONTRIB * 2);
 }
+
+/// Mirrors `create_pool::generate_invite_code`, which only mixes public inputs.
+fn derive_invite_from_public_state(authority: &Pubkey, created_at: i64) -> String {
+    let auth = authority.to_bytes();
+    let ts = created_at.to_le_bytes();
+    (0..8)
+        .map(|i| {
+            let mixed = auth[i] ^ auth[i + 8] ^ ts[i % 8];
+            match mixed % 36 {
+                0..=9 => (b'0' + mixed % 10) as char,
+                _ => (b'A' + mixed % 26) as char,
+            }
+        })
+        .collect()
+}
+
+/// P-2 (issue filed): the invite code is derived from the pool authority and the
+/// creation timestamp, and both are stored in the pool account. Anyone who can read the
+/// account can compute the code and join, so the hash protects nothing.
+/// Ignored so the gate stays green until the program generates the code from secret
+/// input; `cargo test -- --ignored` shows the failure.
+#[tokio::test]
+#[ignore = "P-2: invite code is derivable from public pool state (see docs/e2e-proof)"]
+async fn outsider_cannot_derive_invite_code_from_pool_account() {
+    let outsider = Keypair::new();
+    let mut test = program_test();
+    test.add_account(
+        outsider.pubkey(),
+        Account::new(2_000_000_000, 0, &system_program::id()),
+    );
+    let mut context = test.start_with_context().await;
+    let fixture = create_pool(&mut context, 3, false).await;
+
+    // Everything the outsider uses is public: the pool account's own fields.
+    let pool = load_pool(&account_data(&mut context, fixture.pool).await);
+    let guess = derive_invite_from_public_state(&pool.authority, pool.created_at);
+
+    let ix = join_ix(&fixture, outsider.pubkey(), &guess);
+    let result = send(&mut context, &[ix], &[&outsider]).await;
+    assert!(
+        result.result.is_err(),
+        "outsider joined with invite {guess} computed from public pool state (real code {})",
+        fixture.invite
+    );
+}

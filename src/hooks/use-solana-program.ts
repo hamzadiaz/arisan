@@ -90,6 +90,10 @@ export function useArisanProgram() {
   };
 }
 
+// Polling for a just-confirmed transaction's details (~15s worst case)
+const TX_READBACK_ATTEMPTS = 15;
+const TX_READBACK_DELAY_MS = 1000;
+
 // Transaction execution result
 export interface TransactionResult {
   success: boolean;
@@ -158,12 +162,17 @@ export function useSolanaPoolActions() {
         // Optionally fetch transaction logs (needed for createPool to get invite code)
         if (fetchLogs) {
           try {
-            // Wait a bit for transaction to be finalized
-            await new Promise(resolve => setTimeout(resolve, 2000));
-            const txDetails = await connection.getTransaction(signature, {
-              commitment: "confirmed",
-              maxSupportedTransactionVersion: 0,
-            });
+            // The RPC often has not indexed a just-confirmed transaction yet. For
+            // createPool this read is the only copy of the invite code (only its hash is
+            // on-chain), so poll instead of giving up after one attempt.
+            let txDetails = null;
+            for (let attempt = 0; attempt < TX_READBACK_ATTEMPTS && !txDetails; attempt++) {
+              if (attempt > 0) await new Promise((resolve) => setTimeout(resolve, TX_READBACK_DELAY_MS));
+              txDetails = await connection.getTransaction(signature, {
+                commitment: "confirmed",
+                maxSupportedTransactionVersion: 0,
+              });
+            }
             const meta = txDetails?.meta as
               | {
                   logMessages?: string[] | null;
