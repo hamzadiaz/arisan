@@ -5,7 +5,7 @@ Screenshots: [`ui/`](ui/), mobile 390×844, dark colour scheme, Chromium.
 
 ```bash
 npm run test:security   # Anchor: cargo test -p arisan_contracts --test security_p0 (4 tests)
-npm run test:e2e:ui     # Playwright UI + API + header against `next build && next start` (40 tests)
+npm run test:e2e:ui     # Playwright UI + API + header against `next build && next start` (44 tests)
 npm run test:e2e        # both
 ```
 
@@ -79,11 +79,16 @@ Each fix has a regression test.
 | E2E-6 | Every screen loaded its chain data twice. `SolanaProvider` inserted `WalletModalProvider` after mount, which changed the tree shape and remounted the page. `ConnectionProvider`'s default config also built a new `Connection` on every provider render. Before mount, header Connect taps hit a no-op modal context. | One stable provider tree (only `autoConnect` waits for mount) and a module-level connection config. | ui › 7 "loads its data once" |
 | E2E-7 | The theme toggle keyed off `theme` (`"system"` or `undefined` before mount), so the first tap depended on page state. | It toggles based on the `dark` class currently on `<html>`. | header › every route toggles both ways |
 
+| E2E-8 | `solToLamports` used `Math.floor(sol * 1e9)`, so 2,426 of the one-to-three-decimal amounts up to 100 SOL lost a lamport (4.1 SOL was sent as 4,099,999,999). The amount field also accepted `1.2.3` and sub-lamport amounts that the program rejects only after the wallet prompt. | `Math.round`; the amount input allows one decimal point and at most 9 decimals. | transactions › "exact lamports", "one decimal point", "below one lamport" |
+| E2E-9 | The name was capped at 32 JavaScript characters, but the program's limit is 32 UTF-8 bytes. Names with emoji or accents passed the UI and then failed on-chain with `NameTooLong`. | The name is clamped by UTF-8 bytes without splitting a character. | transactions › "UTF-8 name" |
+
+`e2e/transactions.spec.ts` decodes the `create_pool` / `join_pool` instruction the UI hands to the wallet. The mock wallet records the transaction it was asked to sign, then refuses. So the tests check the exact on-wire arguments, and also that a refused signature leaves the form intact and retryable.
+
 The header's Back button used `history.length`, which counts pages from other sites, so from a deep link it could leave the app. It now falls back to Home unless the user has navigated inside the app.
 
 ## Remaining gaps (not faked)
 
 - **APK / webshell:** not built or tested here. The Mobile Wallet Adapter and Seed Vault handoff needs an Android device or emulator.
 - **Funded-wallet draw on devnet:** not run. On-chain draw and payout correctness is proven in `security_p0` with an in-process bank. A real devnet round needs funded wallets and a deployed program.
-- **Signing from the UI:** the mock wallet refuses to sign. The create, join, pay and draw transactions are covered on-chain, not through the browser.
+- **Signing from the UI:** the mock wallet refuses to sign. Tests decode the create and join instructions the UI builds. Pay and draw from the UI, and a real signed round trip, are not covered in the browser; they are covered on-chain.
 - **Lint:** `npm run lint` still reports errors that were already on `main` (`no-explicit-any` in `use-solana-program.ts` and the cron route, among others). Lint is not part of the gate.

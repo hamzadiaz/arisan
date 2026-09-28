@@ -31,3 +31,27 @@ export function timeUntil(target: Date, now: number = Date.now()): string | null
   if (hours > 0) return `${hours}h ${mins}m`;
   return `${Math.max(mins, 1)}m`;
 }
+
+/** Longest prefix of `value` that fits in `maxBytes` of UTF-8, never splitting a character. */
+export function clampUtf8(value: string, maxBytes: number): string {
+  const encoder = new TextEncoder();
+  let out = "";
+  let used = 0;
+  for (const ch of value) {
+    const size = encoder.encode(ch).length;
+    if (used + size > maxBytes) break;
+    out += ch;
+    used += size;
+  }
+  return out;
+}
+
+/** Digits and at most one decimal point, with no more fractional digits than the token has. */
+export function sanitizeAmountInput(raw: string, decimals: number): string {
+  const cleaned = raw.replace(/[^0-9.]/g, "");
+  const dot = cleaned.indexOf(".");
+  if (dot === -1) return cleaned;
+  const whole = cleaned.slice(0, dot);
+  const fraction = cleaned.slice(dot + 1).replace(/\./g, "").slice(0, decimals);
+  return `${whole}.${fraction}`;
+}

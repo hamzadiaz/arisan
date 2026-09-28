@@ -234,13 +234,14 @@ export function lamportsToSol(lamports: BN | number): number {
 }
 
 // Convert SOL to lamports
+// Round, not floor: 4.1 * 1e9 is 4099999999.9999995 in floating point.
 export function solToLamports(sol: number): BN {
-  return new BN(Math.floor(sol * 1_000_000_000));
+  return new BN(Math.round(sol * 1_000_000_000));
 }
 
 // Convert to token units (6 decimals for USDC/USDT)
 export function toTokenUnits(amount: number, decimals: number = 6): BN {
-  return new BN(Math.floor(amount * Math.pow(10, decimals)));
+  return new BN(Math.round(amount * Math.pow(10, decimals)));
 }
 
 // Convert from token units

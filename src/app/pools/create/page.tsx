@@ -8,12 +8,15 @@ import { Check, Copy, Minus, Plus, Share2, TriangleAlert } from "lucide-react";
 import { toast } from "sonner";
 import { AppShell, Panel, PrimaryButton, SecondaryButton, Section } from "@/components/mobile/app-shell";
 import { useSolanaPoolActions } from "@/hooks/use-solana-program";
-import { formatAmount } from "@/lib/format";
+import { clampUtf8, formatAmount, sanitizeAmountInput } from "@/lib/format";
 import { poolToasts, txErrorToast, dismissToast } from "@/lib/solana/transaction-toast";
 import { cn } from "@/lib/utils";
 
 const MIN_MEMBERS = 2;
 const MAX_MEMBERS = 20;
+// The program stores the name in 32 bytes and rejects longer UTF-8, not 32 characters.
+const NAME_MAX_BYTES = 32;
+const SOL_DECIMALS = 9;
 
 type Created = { poolAddress: string; inviteCode?: string; name: string };
 
@@ -40,7 +43,8 @@ function CreateForm({ onCreated }: { onCreated: (c: Created) => void }) {
   const currency = "SOL" as const;
 
   const value = parseFloat(amount) || 0;
-  const valid = name.trim().length > 0 && name.trim().length <= 32 && value > 0;
+  const nameBytes = new TextEncoder().encode(name.trim()).length;
+  const valid = nameBytes > 0 && nameBytes <= NAME_MAX_BYTES && value > 0;
 
   const submit = async () => {
     if (!connected) {
@@ -74,7 +78,7 @@ function CreateForm({ onCreated }: { onCreated: (c: Created) => void }) {
       <Section title="Name">
         <input
           value={name}
-          onChange={(e) => setName(e.target.value.slice(0, 32))}
+          onChange={(e) => setName(clampUtf8(e.target.value, NAME_MAX_BYTES))}
           placeholder="Family circle"
           className="h-14 w-full rounded-2xl border border-border bg-card px-4 text-base outline-none focus:border-primary"
           disabled={isLoading}
@@ -86,7 +90,7 @@ function CreateForm({ onCreated }: { onCreated: (c: Created) => void }) {
           <input
             inputMode="decimal"
             value={amount}
-            onChange={(e) => setAmount(e.target.value.replace(/[^0-9.]/g, ""))}
+            onChange={(e) => setAmount(sanitizeAmountInput(e.target.value, SOL_DECIMALS))}
             placeholder="0.5"
             className="w-full bg-transparent text-3xl font-bold tracking-tight outline-none"
             disabled={isLoading}
