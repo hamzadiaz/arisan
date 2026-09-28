@@ -8,7 +8,10 @@
     "start": "next start",
     "lint": "eslint",
     "cron": "./scripts/local-cron.sh",
-    "cron:trigger": "curl -s -X GET http://localhost:3000/api/cron/draw -H \"Authorization: Bearer ${CRON_SECRET:?Set CRON_SECRET}\" | jq"
+    "cron:trigger": "curl -s -X GET http://localhost:3000/api/cron/draw -H \"Authorization: Bearer ${CRON_SECRET:?Set CRON_SECRET}\" | jq",
+    "test:security": "cd arisan_contracts && RUST_LOG=off cargo test -p arisan_contracts --test security_p0 -- --test-threads=1",
+    "test:e2e:ui": "playwright test",
+    "test:e2e": "npm run test:security && npm run test:e2e:ui"
   },
   "dependencies": {
     "@coral-xyz/anchor": "^0.32.1",
@@ -54,6 +57,7 @@
     "zod": "^4.1.13"
   },
   "devDependencies": {
+    "@playwright/test": "^1.63.0",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
     "@types/react": "^19",

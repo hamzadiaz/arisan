@@ -1,0 +1,56 @@
+name: E2E
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: e2e-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  security:
+    name: Anchor security_p0 + program flow
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - name: System deps for solana-program-test
+        run: sudo apt-get update && sudo apt-get install -y pkg-config libudev-dev libssl-dev clang protobuf-compiler
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: arisan_contracts
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm run test:security 2>&1 | tee security_p0.log
+        shell: bash
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: security-log
+          path: security_p0.log
+
+  ui:
+    name: Playwright UI + API (mobile 390x844)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:e2e:ui
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: playwright-proof
+          path: |
+            playwright-report/
+            test-results/
+            docs/e2e-proof/ui/
