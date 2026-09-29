@@ -4,7 +4,7 @@ Gold-and-emerald stills, 2026-09-29. Flat chroma plates live under `public/asset
 
 Every file is RGBA 1024×1024. Corner alpha is 0. `green_ratio` counts opaque pixels within channel distance 70 of `#00ff00`. Bright emerald highlights can sit near that green, so the ratio is under about 0.001 rather than exactly 0. There is no floor and no contact shadow in the PNG. Glow belongs in CSS.
 
-The logo is one polished gold coin with an emerald glass ring. Every other coin uses that same gold. Walkthrough frames are copies of the matching still, so the old ink loops do not play. They are not a new motion cycle.
+The logo is one polished gold coin with an emerald glass ring. Every other coin uses that same gold. Walkthrough frames are six distinct poses per scene, per `docs/ANIMATION_SPEC.md`.
 
 ## Stills
 
@@ -21,7 +21,7 @@ The logo is one polished gold coin with an emerald glass ring. Every other coin 
 
 ## Frames
 
-`public/assets/frames/<scene>-01.png` … `06.png` are the same image as the hero still. Plates are in `public/assets/chroma/frames/`.
+`public/assets/frames/<scene>-01.png` … `06.png` are six different poses, following the shot list in `docs/ANIMATION_SPEC.md`. `npm run check:frames` fails if any two frames in a scene share a hash. Plates are in `public/assets/chroma/frames/`.
 
 | Scene | Hero still |
 | --- | --- |

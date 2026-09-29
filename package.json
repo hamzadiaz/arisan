@@ -12,7 +12,8 @@
     "test:security": "cd arisan_contracts && RUST_LOG=off cargo test -p arisan_contracts --test security_p0 -- --test-threads=1",
     "test:e2e:ui": "playwright test",
     "test:e2e": "npm run test:security && npm run test:e2e:ui",
-    "typecheck": "tsc --noEmit -p ."
+    "typecheck": "tsc --noEmit -p .",
+    "check:frames": "./scripts/check-frames.sh"
   },
   "dependencies": {
     "@coral-xyz/anchor": "^0.32.1",

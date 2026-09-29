@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { test, expect, type Page } from "@playwright/test";
 import { expectNoForbiddenCopy, gotoReady } from "./helpers";
 
@@ -55,33 +57,92 @@ test("the last screen is about your wallet, never keys", async ({ page }) => {
   await expect(walkthrough(page)).not.toContainText(/keys/i);
 });
 
-test("scene art cycles its frames once they load", async ({ page }) => {
-  // Serve a real PNG for every frame so the loop runs whether or not the art has landed.
+// Six different real PNGs, so a test loop has something to change between.
+const DISTINCT_PNGS = [
+  "public/assets/generated/create-pool.png",
+  "public/assets/generated/empty-pools.png",
+  "public/assets/generated/join-code.png",
+  "public/icons/icon-192.png",
+  "public/icons/icon-512.png",
+  "public/icons/logo-mark.png",
+];
+const frameIndex = (url: string) => Number(/-0([1-6])\.png$/.exec(url)?.[1] ?? 1) - 1;
+const art = (page: Page) => walkthrough(page).getByTestId("walkthrough-art");
+
+test("scene art cycles six distinct frames", async ({ page }) => {
   await page.route("**/assets/frames/*.png", (route) =>
-    route.fulfill({ path: "public/icons/logo-mark.png", contentType: "image/png" })
+    route.fulfill({ path: DISTINCT_PNGS[frameIndex(route.request().url())], contentType: "image/png" })
   );
+  const requested = new Set<string>();
+  page.on("request", (req) => {
+    if (req.url().includes("/assets/frames/")) requested.add(new URL(req.url()).pathname);
+  });
+
   await gotoReady(page, "/");
-  const art = walkthrough(page).getByTestId("walkthrough-art");
-  await expect(art).toHaveAttribute("data-playing", "true");
+  await expect(art(page)).toHaveAttribute("data-playing", "true");
+  await expect(art(page)).toHaveAttribute("data-frame-state", "playing");
 
   const seen = new Set<string>();
   for (let i = 0; i < 8; i++) {
-    seen.add((await art.getAttribute("src")) ?? "");
+    seen.add((await art(page).getAttribute("src")) ?? "");
     await page.waitForTimeout(60);
   }
   expect([...seen].every((src) => /\/assets\/frames\/circle-0[1-6]\.png$/.test(src))).toBe(true);
   expect(seen.size).toBeGreaterThan(1);
+  expect(requested.size).toBeGreaterThanOrEqual(2);
 });
+
+test("identical frames are reported, not played as a frozen loop", async ({ page }) => {
+  const errors: string[] = [];
+  page.on("console", (msg) => msg.type() === "error" && errors.push(msg.text()));
+  await page.route("**/assets/frames/*.png", (route) =>
+    route.fulfill({ path: "public/icons/logo-mark.png", contentType: "image/png" })
+  );
+
+  await gotoReady(page, "/");
+  await expect(art(page)).toHaveAttribute("data-frame-state", "duplicate");
+  await expect(art(page)).toHaveAttribute("data-playing", "false");
+  await expect(art(page)).toHaveAttribute("src", "/assets/generated/walk-circle.png");
+  expect(errors.some((e) => e.includes("[FrameCycle]") && e.includes("identical"))).toBe(true);
+});
+
+test("a frame that fails to load is reported and keeps the still", async ({ page }) => {
+  const errors: string[] = [];
+  page.on("console", (msg) => msg.type() === "error" && errors.push(msg.text()));
+  await page.route("**/assets/frames/*.png", (route) =>
+    frameIndex(route.request().url()) === 3
+      ? route.fulfill({ status: 404, body: "" })
+      : route.fulfill({ path: DISTINCT_PNGS[frameIndex(route.request().url())], contentType: "image/png" })
+  );
+
+  await gotoReady(page, "/");
+  await expect(art(page)).toHaveAttribute("data-frame-state", "decode-failed");
+  await expect(art(page)).toHaveAttribute("data-playing", "false");
+  await expect(art(page)).toHaveAttribute("src", "/assets/generated/walk-circle.png");
+  expect(errors.some((e) => e.includes("[FrameCycle]"))).toBe(true);
+});
+
+// The gate for the shipped art: same check as `npm run check:frames`.
+for (const scene of ["circle", "pay", "payout", "wallet"]) {
+  test(`shipped ${scene} frames are six distinct images`, () => {
+    const hashes = Array.from({ length: 6 }, (_, i) =>
+      createHash("sha256")
+        .update(readFileSync(`public/assets/frames/${scene}-0${i + 1}.png`))
+        .digest("hex")
+    );
+    expect(new Set(hashes).size, `${scene} frame hashes: ${hashes.map((h) => h.slice(0, 12)).join(" ")}`).toBe(6);
+  });
+}
 
 test.describe("reduced motion", () => {
   test.use({ reducedMotion: "reduce" });
 
   test("shows the still and never cycles", async ({ page }) => {
     await gotoReady(page, "/");
-    const art = walkthrough(page).getByTestId("walkthrough-art");
-    await expect(art).toHaveAttribute("src", "/assets/generated/walk-circle.png");
+    await expect(art(page)).toHaveAttribute("src", "/assets/generated/walk-circle.png");
     await page.waitForTimeout(500);
-    await expect(art).toHaveAttribute("src", "/assets/generated/walk-circle.png");
-    await expect(art).toHaveAttribute("data-playing", "false");
+    await expect(art(page)).toHaveAttribute("src", "/assets/generated/walk-circle.png");
+    await expect(art(page)).toHaveAttribute("data-playing", "false");
+    await expect(art(page)).toHaveAttribute("data-frame-state", "reduced-motion");
   });
 });
