@@ -7,7 +7,7 @@ import { expectNoForbiddenCopy, gotoReady } from "./helpers";
 test.use({ storageState: { cookies: [], origins: [] } });
 
 const KEY = "arisan.walkthrough.v1";
-const TITLES = ["Form a circle", "Everyone pays in", "One takes the pot", "Your wallet"];
+const TITLES = ["Together", "Pay in", "Jackpot", "Your wallet"];
 const walkthrough = (page: Page) => page.getByTestId("walkthrough");
 const stored = (page: Page) => page.evaluate((k) => localStorage.getItem(k), KEY);
 
@@ -51,37 +51,74 @@ test("the last screen is about your wallet, never keys", async ({ page }) => {
   await gotoReady(page, "/");
   for (let i = 0; i < 3; i++) await walkthrough(page).getByRole("button", { name: "Next" }).click();
   await expect(walkthrough(page).getByRole("heading", { name: "Your wallet" })).toBeVisible();
-  await expect(walkthrough(page).getByText("You sign.")).toBeVisible();
+  await expect(walkthrough(page).getByText("You approve.")).toBeVisible();
   await expect(walkthrough(page)).not.toContainText(/keys/i);
 });
 
-test("scene art cycles its frames once they load", async ({ page }) => {
-  // Serve a real PNG for every frame so the loop runs whether or not the art has landed.
-  await page.route("**/assets/frames/*.png", (route) =>
-    route.fulfill({ path: "public/icons/logo-mark.png", contentType: "image/png" })
-  );
-  await gotoReady(page, "/");
-  const art = walkthrough(page).getByTestId("walkthrough-art");
-  await expect(art).toHaveAttribute("data-playing", "true");
+const scene = (page: Page) => walkthrough(page).getByTestId("walkthrough-scene");
+const snapshot = (page: Page) =>
+  scene(page).evaluate((c: HTMLCanvasElement) => ({ frame: c.dataset.frame, pixels: c.toDataURL() }));
 
-  const seen = new Set<string>();
-  for (let i = 0; i < 8; i++) {
-    seen.add((await art.getAttribute("src")) ?? "");
-    await page.waitForTimeout(60);
+/** Count of lit (non-transparent) pixels in the middle of the scene. */
+const litPixels = (page: Page) =>
+  scene(page).evaluate((c: HTMLCanvasElement) => {
+    const ctx = c.getContext("2d")!;
+    const { data } = ctx.getImageData(c.width / 4, c.height / 5, c.width / 2, c.height / 2);
+    let lit = 0;
+    for (let i = 3; i < data.length; i += 4) if (data[i] > 40) lit++;
+    return lit;
+  });
+
+test("the scene is a full-screen canvas that is already moving within a second", async ({ page }) => {
+  await gotoReady(page, "/");
+  const canvas = scene(page);
+  await expect(canvas).toHaveAttribute("data-playing", "true");
+
+  const box = (await canvas.boundingBox())!;
+  const viewport = page.viewportSize()!;
+  expect(box.width).toBeGreaterThanOrEqual(viewport.width);
+  expect(box.height).toBeGreaterThanOrEqual(viewport.height);
+  expect(await litPixels(page)).toBeGreaterThan(1000);
+
+  // The loop is running: the heartbeat ticks and the drawn pixels change.
+  const a = await snapshot(page);
+  await expect.poll(async () => (await snapshot(page)).frame, { timeout: 1_000 }).not.toBe(a.frame);
+  await page.waitForTimeout(300);
+  expect((await snapshot(page)).pixels).not.toBe(a.pixels);
+});
+
+test("each beat tells its part of the story on the same canvas", async ({ page }) => {
+  await gotoReady(page, "/");
+  const canvas = scene(page);
+  const handle = await canvas.elementHandle();
+  for (let beat = 0; beat < 4; beat++) {
+    await expect(canvas).toHaveAttribute("data-beat", String(beat));
+    const a = await snapshot(page);
+    await page.waitForTimeout(250);
+    expect((await snapshot(page)).pixels).not.toBe(a.pixels);
+    if (beat < 3) await walkthrough(page).getByRole("button", { name: "Next" }).click();
   }
-  expect([...seen].every((src) => /\/assets\/frames\/circle-0[1-6]\.png$/.test(src))).toBe(true);
-  expect(seen.size).toBeGreaterThan(1);
+  // One canvas for the whole intro, never remounted between beats.
+  expect(await handle!.evaluate((c) => c.isConnected)).toBe(true);
 });
 
 test.describe("reduced motion", () => {
   test.use({ reducedMotion: "reduce" });
 
-  test("shows the still and never cycles", async ({ page }) => {
+  test("draws a still scene and never loops", async ({ page }) => {
     await gotoReady(page, "/");
-    const art = walkthrough(page).getByTestId("walkthrough-art");
-    await expect(art).toHaveAttribute("src", "/assets/generated/walk-circle.png");
+    const canvas = scene(page);
+    await expect(canvas).toHaveAttribute("data-playing", "false");
+    await expect(canvas).toHaveAttribute("data-frame", "still");
+    expect(await litPixels(page)).toBeGreaterThan(1000);
+
+    const a = await snapshot(page);
     await page.waitForTimeout(500);
-    await expect(art).toHaveAttribute("src", "/assets/generated/walk-circle.png");
-    await expect(art).toHaveAttribute("data-playing", "false");
+    expect((await snapshot(page)).pixels).toBe(a.pixels);
+
+    // Moving on redraws the next beat's settled pose, still without looping.
+    await walkthrough(page).getByRole("button", { name: "Next" }).click();
+    await expect(canvas).toHaveAttribute("data-beat", "1");
+    await expect(canvas).toHaveAttribute("data-playing", "false");
   });
 });
