@@ -1,33 +1,33 @@
 # CLOCK IN asset manifest
 
-Ink-and-gouache drawings, 2026-09-29. Flat chroma plates live under `public/assets/chroma/`. The app loads the transparent PNGs (`src/lib/assets.ts`).
+Gold-and-emerald stills, 2026-09-29. Flat chroma plates live under `public/assets/chroma/`. The app loads the transparent PNGs (`src/lib/assets.ts`).
 
-Every file is RGBA 1024×1024. Corner alpha is 0. `green_ratio` counts opaque pixels within channel distance 70 of `#00ff00` and is 0 on every file. The backdrop is keyed from the border green, tight enough that forest and emerald paint stays.
+Every file is RGBA 1024×1024. Corner alpha is 0. `green_ratio` counts opaque pixels within channel distance 70 of `#00ff00`. Bright emerald highlights can sit near that green, so the ratio is under about 0.001 rather than exactly 0. There is no floor and no contact shadow in the PNG. Glow belongs in CSS.
 
-Walk stills are frame 03 of each six-frame loop. The circle, pay, and payout loops reuse one drawing and move only the hands or the coins. The wallet loop keeps the phone and the wallet still and moves the hand.
+The logo is one polished gold coin with an emerald glass ring. Every other coin uses that same gold. Walkthrough frames are copies of the matching still, so the old ink loops do not play. They are not a new motion cycle.
 
 ## Stills
 
 | Name | Chroma source | Transparent PNG | Padding (L,T,R,B) |
 | --- | --- | --- | --- |
-| logo | `public/assets/chroma/logo.png` | `public/assets/generated/logo.png` | 169, 165, 143, 142 |
-| empty-pools | `public/assets/chroma/empty-pools.png` | `public/assets/generated/empty-pools.png` | 276, 271, 243, 250 |
-| create-pool | `public/assets/chroma/create-pool.png` | `public/assets/generated/create-pool.png` | 196, 205, 160, 201 |
-| join-code | `public/assets/chroma/join-code.png` | `public/assets/generated/join-code.png` | 240, 233, 202, 206 |
-| walk-circle | `public/assets/chroma/walk-circle.png` | `public/assets/generated/walk-circle.png` | 180, 162, 149, 167 |
-| walk-pay | `public/assets/chroma/walk-pay.png` | `public/assets/generated/walk-pay.png` | 306, 150, 280, 92 |
-| walk-payout | `public/assets/chroma/walk-payout.png` | `public/assets/generated/walk-payout.png` | 132, 230, 97, 239 |
-| walk-wallet | `public/assets/chroma/walk-wallet.png` | `public/assets/generated/walk-wallet.png` | 160, 84, 337, 137 |
+| logo | `public/assets/chroma/logo.png` | `public/assets/generated/logo.png` | 192, 194, 191, 193 |
+| empty-pools | `public/assets/chroma/empty-pools.png` | `public/assets/generated/empty-pools.png` | 189, 192, 189, 191 |
+| create-pool | `public/assets/chroma/create-pool.png` | `public/assets/generated/create-pool.png` | 198, 206, 201, 200 |
+| join-code | `public/assets/chroma/join-code.png` | `public/assets/generated/join-code.png` | 193, 192, 103, 209 |
+| walk-circle | `public/assets/chroma/walk-circle.png` | `public/assets/generated/walk-circle.png` | 178, 176, 173, 178 |
+| walk-pay | `public/assets/chroma/walk-pay.png` | `public/assets/generated/walk-pay.png` | 280, 247, 280, 292 |
+| walk-payout | `public/assets/chroma/walk-payout.png` | `public/assets/generated/walk-payout.png` | 282, 219, 282, 211 |
+| walk-wallet | `public/assets/chroma/walk-wallet.png` | `public/assets/generated/walk-wallet.png` | 323, 158, 2, 158 |
 
 ## Frames
 
-`public/assets/frames/<scene>-01.png` … `06.png`, with plates in `public/assets/chroma/frames/`.
+`public/assets/frames/<scene>-01.png` … `06.png` are the same image as the hero still. Plates are in `public/assets/chroma/frames/`.
 
-| Scene | What moves | Hero still |
-| --- | --- | --- |
-| circle | Four hands, each holding one coin, gather into a ring and ease back open | `walk-circle.png` = `circle-03.png` |
-| pay | Three coins drop onto the pot and the column refills from the top | `walk-pay.png` = `pay-03.png` |
-| payout | Three coins travel from the pot into one open hand | `walk-payout.png` = `payout-03.png` |
-| wallet | A hand taps a phone. A closed wallet sits beside the phone. The phone and wallet do not move | `walk-wallet.png` = `wallet-03.png` |
+| Scene | Hero still |
+| --- | --- |
+| circle | `walk-circle.png` |
+| pay | `walk-pay.png` |
+| payout | `walk-payout.png` |
+| wallet | `walk-wallet.png` |
 
-Subjects: a lidded espresso pot in a wreath of plain coins; a quiet empty ring; a ring of five coins still closing; a notched gold ticket-coin with a green wax seal; hands assembling a circle; coins falling into the pot; coins crossing to one open palm; a phone, a bifold wallet, and a hand approving on the phone.
+Subjects: one gold coin in an emerald ring; an empty gold-and-emerald ring; a coin with a ring still open; a gold coin with an emerald ticket clasp; eight matching gold coins on an emerald ring; a coin above a ring; a coin lifted off a ring; a phone, that same coin, and a thumb.
