@@ -237,7 +237,7 @@ for (const theme of ["dark", "light"] as const) {
       await setTheme(page, theme);
       await page.goto("/");
       const walkthrough = page.getByTestId("walkthrough");
-      for (const [i, title] of ["Form a circle", "Everyone pays in", "One takes the pot", "Your keys"].entries()) {
+      for (const [i, title] of ["Form a circle", "Everyone pays in", "One takes the pot", "Your wallet"].entries()) {
         await expect(walkthrough.getByRole("heading", { name: title })).toBeVisible();
         await page.waitForLoadState("networkidle").catch(() => {});
         await page.waitForTimeout(400);

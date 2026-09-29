@@ -20,7 +20,7 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "Arisan - Savings circles on Solana",
   description:
-    "Save together with people you trust. Everyone pays in each round, one member takes the pot. Zero interest. Your keys stay in your wallet.",
+    "Save together with people you trust. Everyone pays in each round, one member takes the pot. Zero interest. You sign from your own wallet.",
   keywords: [
     "arisan",
     "rotating savings",

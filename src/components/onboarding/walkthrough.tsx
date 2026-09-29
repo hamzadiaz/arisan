@@ -2,17 +2,17 @@
 
 import { useState, useSyncExternalStore } from "react";
 import { AnimatePresence, motion, useReducedMotion, type PanInfo } from "framer-motion";
-import { Art } from "@/components/mobile/art";
-import { ASSETS } from "@/lib/assets";
+import { FrameCycle } from "@/components/mobile/frame-cycle";
+import { ASSETS, FRAMES } from "@/lib/assets";
 import { cn } from "@/lib/utils";
 
 export const WALKTHROUGH_KEY = "arisan.walkthrough.v1";
 
 const SCREENS = [
-  { art: ASSETS.walkCircle, title: "Form a circle" },
-  { art: ASSETS.walkPay, title: "Everyone pays in" },
-  { art: ASSETS.walkPayout, title: "One takes the pot" },
-  { art: ASSETS.walkWallet, title: "Your keys" },
+  { still: ASSETS.walkCircle, frames: FRAMES.circle, title: "Form a circle" },
+  { still: ASSETS.walkPay, frames: FRAMES.pay, title: "Everyone pays in" },
+  { still: ASSETS.walkPayout, frames: FRAMES.payout, title: "One takes the pot" },
+  { still: ASSETS.walkWallet, frames: FRAMES.wallet, title: "Your wallet", line: "You sign." },
 ];
 
 // Remembered in memory too, so it stays closed if storage is unavailable (private mode).
@@ -112,13 +112,14 @@ export function Walkthrough() {
                   transition={{ duration: 0.28, ease: [0.22, 1, 0.36, 1] }}
                   className="flex flex-col items-center"
                 >
-                  <motion.div
-                    animate={reduceMotion ? undefined : { y: [0, -10, 0] }}
-                    transition={{ duration: 4, repeat: Infinity, ease: "easeInOut" }}
-                  >
-                    <Art src={screen.art} className="size-72" />
-                  </motion.div>
+                  <FrameCycle
+                    frames={screen.frames}
+                    still={screen.still}
+                    data-testid="walkthrough-art"
+                    className="size-72"
+                  />
                   <h2 className="mt-4 text-2xl font-semibold tracking-tight">{screen.title}</h2>
+                  {screen.line && <p className="mt-1 text-[15px] text-muted-foreground">{screen.line}</p>}
                 </motion.div>
               </AnimatePresence>
             </motion.div>
