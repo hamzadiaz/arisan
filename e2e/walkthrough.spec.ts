@@ -80,11 +80,11 @@ test("the scene is a full-screen canvas that is already moving within a second",
   expect(box.height).toBeGreaterThanOrEqual(viewport.height);
   expect(await litPixels(page)).toBeGreaterThan(1000);
 
+  // The loop is running: the heartbeat ticks and the drawn pixels change.
   const a = await snapshot(page);
+  await expect.poll(async () => (await snapshot(page)).frame, { timeout: 1_000 }).not.toBe(a.frame);
   await page.waitForTimeout(300);
-  const b = await snapshot(page);
-  expect(b.frame).not.toBe(a.frame);
-  expect(b.pixels).not.toBe(a.pixels);
+  expect((await snapshot(page)).pixels).not.toBe(a.pixels);
 });
 
 test("each beat tells its part of the story on the same canvas", async ({ page }) => {
