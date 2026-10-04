@@ -1,9 +1,44 @@
-import * as THREE from "three";
+import {
+  AdditiveBlending,
+  BufferGeometry,
+  CanvasTexture,
+  CircleGeometry,
+  Color,
+  CylinderGeometry,
+  DirectionalLight,
+  DoubleSide,
+  ExtrudeGeometry,
+  Group,
+  LatheGeometry,
+  Material,
+  Mesh,
+  MeshBasicMaterial,
+  MeshPhysicalMaterial,
+  MeshStandardMaterial,
+  NeutralToneMapping,
+  PMREMGenerator,
+  PerspectiveCamera,
+  PlaneGeometry,
+  RepeatWrapping,
+  Scene,
+  Shape,
+  ShapeGeometry,
+  SphereGeometry,
+  Sprite,
+  SpriteMaterial,
+  SRGBColorSpace,
+  Texture,
+  TorusGeometry,
+  Vector2,
+  Vector3,
+  WebGLRenderer,
+} from "three";
 import { type DialSpec, markState } from "./dial-spec";
 import { EMBLEM_FULL, emblemSegments } from "./emblem";
 
 // Hamza's end-card coin, rebuilt in code and set in emerald glass that carries the circle.
-// Loaded on demand by <Dial/>; nothing here runs on the server.
+// One engine (one renderer, one canvas) for the whole session: <Dial/> lends it a host
+// element while it's on screen. It draws only when something changes.
 
 const TAU = Math.PI * 2;
 const clamp01 = (v: number) => Math.min(1, Math.max(0, v));
@@ -34,42 +69,34 @@ const canvas2d = (w: number, h = w) => {
   return c;
 };
 
-const GOLD = new THREE.Color("#f2cf83");
-const GOLD_EDGE = new THREE.Color("#d9b064");
-const MARK_GOLD = new THREE.Color("#efcb6a");
-const LUME = new THREE.Color("#5cf2b6");
-const LUME_FLASH = new THREE.Color("#ecfff7");
-const SIGNAL = new THREE.Color("#ff7a5c");
+const MARK_GOLD = new Color("#efcb6a");
+const LUME = new Color("#5cf2b6");
+const LUME_FLASH = new Color("#ecfff7");
+const SIGNAL = new Color("#ff7a5c");
+const PIP = new Color("#f1da92");
 
 export type DialView = "hero" | "top" | "create" | "result";
 const VIEWS: Record<DialView, [elevation: number, distance: number]> = {
-  hero: [1.0, 6.3],
-  top: [1.1, 6.6],
-  create: [1.2, 6.2],
-  result: [1.05, 6.4],
+  hero: [1.0, 6.5],
+  top: [1.1, 6.8],
+  create: [1.2, 6.4],
+  result: [1.05, 6.6],
 };
 
-export interface DialSceneOptions {
-  light: boolean;
-  view: DialView;
-  /** Opaque page color behind the dial. Needed in light mode so the glass refracts the page. */
-  background?: string;
-  reducedMotion: boolean;
-}
-
+type Theme = "dark" | "light";
 type Tween = { t0: number; dur: number; fn: (k: number) => void; resolve: () => void };
-type Mark = THREE.Group & { userData: { dome?: THREE.Mesh } };
+type MarkGroup = Group & { userData: { dome?: Mesh } };
 
-// ---------------------------------------------------------------- shared resources
-function studioEnv(renderer: THREE.WebGLRenderer, light: boolean) {
-  const scene = new THREE.Scene();
-  scene.background = new THREE.Color(light ? 0xd8d4c9 : 0x050707);
-  const geo = new THREE.PlaneGeometry(1, 1);
-  const mats: THREE.Material[] = [];
+// ---------------------------------------------------------------- textures and materials
+function studioEnv(renderer: WebGLRenderer, light: boolean) {
+  const scene = new Scene();
+  scene.background = new Color(light ? 0xd8d4c9 : 0x050707);
+  const geo = new PlaneGeometry(1, 1);
+  const mats: Material[] = [];
   const panel = (w: number, h: number, hex: number, k: number, pos: [number, number, number]) => {
-    const m = new THREE.MeshBasicMaterial({ color: new THREE.Color(hex).multiplyScalar(k), side: THREE.DoubleSide });
+    const m = new MeshBasicMaterial({ color: new Color(hex).multiplyScalar(k), side: DoubleSide });
     mats.push(m);
-    const mesh = new THREE.Mesh(geo, m);
+    const mesh = new Mesh(geo, m);
     mesh.scale.set(w, h, 1);
     mesh.position.set(...pos);
     mesh.lookAt(0, 0, 0);
@@ -82,7 +109,7 @@ function studioEnv(renderer: THREE.WebGLRenderer, light: boolean) {
   panel(1.1, 8, 0xe2f1ff, light ? 3 : 5, [7, 2, -2]);
   panel(6, 1.6, 0x2ad497, light ? 1.2 : 3.2, [0, -1.2, -7]);
   panel(4, 3, 0xffe7c8, light ? 1.6 : 2.6, [2.5, 3, 7]);
-  const pm = new THREE.PMREMGenerator(renderer);
+  const pm = new PMREMGenerator(renderer);
   const tex = pm.fromScene(scene, 0.03).texture;
   pm.dispose();
   geo.dispose();
@@ -90,8 +117,9 @@ function studioEnv(renderer: THREE.WebGLRenderer, light: boolean) {
   return tex;
 }
 
+// Beaten metal: overlapping shallow strikes, coarse like the film's coin.
 function hammeredTextures() {
-  const S = 1024;
+  const S = 512;
   const bump = canvas2d(S);
   const rough = canvas2d(S);
   const b = bump.getContext("2d")!;
@@ -101,10 +129,10 @@ function hammeredTextures() {
   r.fillStyle = "#8a8a8a";
   r.fillRect(0, 0, S, S);
   const R = rng(7);
-  for (let i = 0; i < 2600; i++) {
+  for (let i = 0; i < 1100; i++) {
     const x = R() * S;
     const y = R() * S;
-    const rad = S * (0.005 + R() * 0.014);
+    const rad = S * (0.014 + R() * 0.03);
     const g = b.createRadialGradient(x - rad * 0.25, y - rad * 0.25, 0, x, y, rad);
     g.addColorStop(0, "rgba(34,34,34,0.42)");
     g.addColorStop(0.6, "rgba(100,100,100,0.16)");
@@ -123,11 +151,11 @@ function hammeredTextures() {
     r.arc(x, y, rad, 0, TAU);
     r.fill();
   }
-  const tb = new THREE.CanvasTexture(bump);
-  const tr = new THREE.CanvasTexture(rough);
+  const tb = new CanvasTexture(bump);
+  const tr = new CanvasTexture(rough);
   for (const t of [tb, tr]) {
-    t.wrapS = t.wrapT = THREE.RepeatWrapping;
-    t.anisotropy = 8;
+    t.wrapS = t.wrapT = RepeatWrapping;
+    t.anisotropy = 4;
   }
   return { bump: tb, rough: tr };
 }
@@ -145,8 +173,8 @@ function reedTexture() {
     }
   }
   g.putImageData(img, 0, 0);
-  const t = new THREE.CanvasTexture(c);
-  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  const t = new CanvasTexture(c);
+  t.wrapS = t.wrapT = RepeatWrapping;
   t.repeat.set(1.5, 1);
   return t;
 }
@@ -158,44 +186,42 @@ function radialTexture(stops: [number, string][], size = 128) {
   stops.forEach(([o, col]) => gr.addColorStop(o, col));
   g.fillStyle = gr;
   g.fillRect(0, 0, size, size);
-  const t = new THREE.CanvasTexture(c);
-  t.colorSpace = THREE.SRGBColorSpace;
+  const t = new CanvasTexture(c);
+  t.colorSpace = SRGBColorSpace;
   return t;
 }
 
-const goldMat = (opts: { rough?: number; bump?: THREE.Texture; bumpScale?: number; roughMap?: THREE.Texture; color?: THREE.Color } = {}) =>
-  new THREE.MeshStandardMaterial({
-    color: opts.color ?? GOLD,
+const goldMat = (opts: { color: Color; rough: number; bump?: Texture; bumpScale?: number; roughMap?: Texture; transparent?: boolean }) =>
+  new MeshStandardMaterial({
+    color: opts.color,
     metalness: 1,
-    roughness: opts.rough ?? 0.3,
+    roughness: opts.rough,
     bumpMap: opts.bump ?? null,
     bumpScale: opts.bumpScale ?? 1,
     roughnessMap: opts.roughMap ?? null,
+    transparent: opts.transparent ?? false,
   });
 
 // Minted relief: each wall of the maze is a beveled extrusion, so it catches light like a struck coin.
-function buildEmblem(mat: THREE.Material, H: number) {
-  const W = 0.027;
-  const bevel = 0.0058;
+function emblemGeometry(H: number) {
+  const W = 0.046;
+  const bevel = 0.009;
   const hw = W / 2 - bevel;
-  const shapes = emblemSegments(EMBLEM_FULL).map(([x1, z1, x2, z2]) => {
-    const ax = x1;
-    const ay = -z1;
-    const bx = x2;
-    const by = -z2;
+  const quad = (ax: number, ay: number, bx: number, by: number) => {
     const L = Math.hypot(bx - ax, by - ay);
     const dx = (bx - ax) / L;
     const dy = (by - ay) / L;
     const nx = -dy;
     const ny = dx;
-    const sh = new THREE.Shape();
+    const sh = new Shape();
     sh.moveTo(ax - dx * hw + nx * hw, ay - dy * hw + ny * hw);
     sh.lineTo(bx + dx * hw + nx * hw, by + dy * hw + ny * hw);
     sh.lineTo(bx + dx * hw - nx * hw, by + dy * hw - ny * hw);
     sh.lineTo(ax - dx * hw - nx * hw, ay - dy * hw - ny * hw);
     sh.closePath();
     return sh;
-  });
+  };
+  const shapes = emblemSegments(EMBLEM_FULL).map(([x1, z1, x2, z2]) => quad(x1, -z1, x2, -z2));
   const s = 0.1;
   const sq: [number, number][] = [
     [0, -s],
@@ -206,88 +232,24 @@ function buildEmblem(mat: THREE.Material, H: number) {
   for (let i = 0; i < 4; i++) {
     const [ax, az] = sq[i];
     const [bx, bz] = sq[(i + 1) % 4];
-    const L = Math.hypot(bx - ax, bz - az);
-    const dx = (bx - ax) / L;
-    const dy = (-bz + az) / L;
-    const nx = -dy;
-    const ny = dx;
-    const sh = new THREE.Shape();
-    sh.moveTo(ax - dx * hw + nx * hw, -az - dy * hw + ny * hw);
-    sh.lineTo(bx + dx * hw + nx * hw, -bz + dy * hw + ny * hw);
-    sh.lineTo(bx + dx * hw - nx * hw, -bz + dy * hw - ny * hw);
-    sh.lineTo(ax - dx * hw - nx * hw, -az - dy * hw - ny * hw);
-    sh.closePath();
-    shapes.push(sh);
+    shapes.push(quad(ax, -az, bx, -bz));
   }
-  const geo = new THREE.ExtrudeGeometry(shapes, { depth: 0.012, bevelEnabled: true, bevelThickness: 0.006, bevelSize: bevel, bevelSegments: 2, curveSegments: 1 });
+  const geo = new ExtrudeGeometry(shapes, { depth: 0.016, bevelEnabled: true, bevelThickness: 0.009, bevelSize: bevel, bevelSegments: 3, curveSegments: 1 });
   geo.rotateX(-Math.PI / 2);
   geo.translate(0, H - 0.003, 0);
-  const g = new THREE.Group();
-  g.add(new THREE.Mesh(geo, mat));
-  // square-cut emerald: a four-sided lathe, faceted
-  const gemPts = [
-    [0, -0.034],
-    [0.074, -0.002],
-    [0.078, 0.006],
-    [0.052, 0.03],
-    [0, 0.03],
-  ].map(([x, y]) => new THREE.Vector2(x, y));
-  const gem = new THREE.Mesh(
-    new THREE.LatheGeometry(gemPts, 4),
-    new THREE.MeshPhysicalMaterial({ color: "#1ec98a", roughness: 0.02, metalness: 0, transmission: 0.55, thickness: 0.16, ior: 1.58, emissive: "#0a6b45", emissiveIntensity: 0.6, flatShading: true, specularIntensity: 1 })
-  );
-  gem.position.y = H + 0.03;
-  g.add(gem);
-  return g;
+  return geo;
 }
 
-function buildCoin() {
-  const g = new THREE.Group();
-  const hm = hammeredTextures();
-  const field = goldMat({ rough: 0.62, roughMap: hm.rough, bump: hm.bump, bumpScale: 1.15 });
-  const polish = goldMat({ rough: 0.16 });
-  const edge = goldMat({ rough: 0.3, bump: reedTexture(), bumpScale: 1.4, color: GOLD_EDGE });
-  const H = 0.07;
-  const face = new THREE.CircleGeometry(0.86, 160);
-  const top = new THREE.Mesh(face, field);
-  top.rotation.x = -Math.PI / 2;
-  top.position.y = H;
-  const bottom = new THREE.Mesh(face, field);
-  bottom.rotation.x = Math.PI / 2;
-  bottom.position.y = -H;
-  const rimTop = [
-    [1.0, 0.075],
-    [0.988, 0.094],
-    [0.955, 0.102],
-    [0.885, 0.102],
-    [0.866, 0.094],
-    [0.86, 0.07],
-  ].map(([x, y]) => new THREE.Vector2(x, y));
-  const rimBottom = rimTop.map((v) => new THREE.Vector2(v.x, -v.y)).reverse();
-  g.add(
-    top,
-    bottom,
-    new THREE.Mesh(new THREE.LatheGeometry(rimTop, 192), polish),
-    new THREE.Mesh(new THREE.LatheGeometry(rimBottom, 192), polish),
-    new THREE.Mesh(new THREE.CylinderGeometry(1, 1, 0.15, 256, 1, true), edge)
-  );
-  g.add(buildEmblem(polish, H));
-  const back = buildEmblem(polish, H);
-  back.rotation.x = Math.PI;
-  g.add(back);
-  return g;
-}
-
-function buildBezel() {
+function bezelGeometry() {
   const inner = 1.03;
-  const outer = 1.32;
-  const half = 0.16;
-  const corner = 0.05;
-  const pts: THREE.Vector2[] = [];
+  const outer = 1.34;
+  const half = 0.19;
+  const corner = 0.06;
+  const pts: Vector2[] = [];
   const arc = (cx: number, cy: number, a0: number, a1: number, n = 10) => {
     for (let i = 0; i <= n; i++) {
       const a = lerp(a0, a1, i / n);
-      pts.push(new THREE.Vector2(cx + corner * Math.cos(a), cy + corner * Math.sin(a)));
+      pts.push(new Vector2(cx + corner * Math.cos(a), cy + corner * Math.sin(a)));
     }
   };
   arc(outer - corner, -half + corner, -Math.PI / 2, 0);
@@ -295,146 +257,236 @@ function buildBezel() {
   arc(inner + corner, half - corner, Math.PI / 2, Math.PI);
   arc(inner + corner, -half + corner, Math.PI, 1.5 * Math.PI);
   pts.push(pts[0].clone());
-  return new THREE.Mesh(
-    new THREE.LatheGeometry(pts, 192),
-    new THREE.MeshPhysicalMaterial({
-      color: "#e8fff5",
-      roughness: 0.04,
+  return new LatheGeometry(pts, 192);
+}
+
+// ---------------------------------------------------------------- the engine
+export interface AttachOptions {
+  theme: Theme;
+  view: DialView;
+  /** The page color under the dial; light mode draws it opaque so the glass refracts the page. */
+  background: string;
+  reducedMotion: boolean;
+}
+
+class DialEngine {
+  readonly canvas: HTMLCanvasElement;
+  private renderer: WebGLRenderer;
+  private scene = new Scene();
+  private camera = new PerspectiveCamera(26, 1, 0.1, 50);
+  private root = new Group();
+  private coinPivot = new Group();
+  private dial = new Group();
+  private marks: MarkGroup[] = [];
+  private tweens: Tween[] = [];
+  private now = 0;
+  private looping = false;
+  private spinning = false;
+  private spec: DialSpec = { seats: 6, mode: "pending" };
+  private opts: AttachOptions = { theme: "dark", view: "hero", background: "#0a0f0d", reducedMotion: false };
+  private host: HTMLElement | null = null;
+  private queue: Promise<void> = Promise.resolve();
+  private envs = new Map<Theme, Texture>();
+  private geo: Record<string, BufferGeometry> = {};
+  private mats: Record<string, Material> = {};
+  private themed: { back: MeshStandardMaterial; glass: MeshPhysicalMaterial; shadow: MeshBasicMaterial; gold: MeshStandardMaterial[] };
+  private glowTex: Texture;
+  private lost = false;
+  onLost?: () => void;
+
+  constructor() {
+    this.canvas = document.createElement("canvas");
+    this.canvas.className = "pointer-events-none absolute inset-0 size-full";
+    this.canvas.setAttribute("aria-hidden", "true");
+    this.renderer = new WebGLRenderer({ canvas: this.canvas, antialias: true, alpha: true, powerPreference: "default" });
+    const lowPower = (navigator.hardwareConcurrency ?? 8) <= 4;
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, lowPower ? 1.5 : 2));
+    this.renderer.outputColorSpace = SRGBColorSpace;
+    this.renderer.toneMapping = NeutralToneMapping;
+    this.renderer.transmissionResolutionScale = 0.5;
+    this.canvas.addEventListener("webglcontextlost", (e) => {
+      e.preventDefault();
+      this.lost = true;
+      this.stopLoop();
+      this.onLost?.();
+    });
+
+    const hm = hammeredTextures();
+    const gold = new Color("#e0b453");
+    const field = goldMat({ color: gold, rough: 0.5, roughMap: hm.rough, bump: hm.bump, bumpScale: 2.2 });
+    const polish = goldMat({ color: gold, rough: 0.16 });
+    const edge = goldMat({ color: new Color("#c99a3e"), rough: 0.3, bump: reedTexture(), bumpScale: 1.4 });
+    const H = 0.07;
+    const face = new CircleGeometry(0.86, 160);
+    const top = new Mesh(face, field);
+    top.rotation.x = -Math.PI / 2;
+    top.position.y = H;
+    const bottom = new Mesh(face, field);
+    bottom.rotation.x = Math.PI / 2;
+    bottom.position.y = -H;
+    const rimTop = [
+      [1.0, 0.075],
+      [0.988, 0.094],
+      [0.955, 0.102],
+      [0.885, 0.102],
+      [0.866, 0.094],
+      [0.86, 0.07],
+    ].map(([x, y]) => new Vector2(x, y));
+    const rimBottom = rimTop.map((v) => new Vector2(v.x, -v.y)).reverse();
+    const emblem = emblemGeometry(H);
+    const frontEmblem = new Mesh(emblem, polish);
+    const backEmblem = new Mesh(emblem, polish);
+    backEmblem.rotation.x = Math.PI;
+    const gemPts = [
+      [0, -0.034],
+      [0.074, -0.002],
+      [0.078, 0.006],
+      [0.052, 0.03],
+      [0, 0.03],
+    ].map(([x, y]) => new Vector2(x, y));
+    const gem = new Mesh(
+      new LatheGeometry(gemPts, 4),
+      new MeshPhysicalMaterial({ color: "#1ec98a", roughness: 0.02, metalness: 0, transmission: 0.55, thickness: 0.16, ior: 1.58, emissive: "#0a6b45", emissiveIntensity: 0.6, flatShading: true })
+    );
+    gem.position.y = H + 0.03;
+    this.coinPivot.add(
+      top,
+      bottom,
+      new Mesh(new LatheGeometry(rimTop, 192), polish),
+      new Mesh(new LatheGeometry(rimBottom, 192), polish),
+      new Mesh(new CylinderGeometry(1, 1, 0.15, 256, 1, true), edge),
+      frontEmblem,
+      backEmblem,
+      gem
+    );
+
+    const glass = new MeshPhysicalMaterial({
+      color: "#f2fff8",
+      roughness: 0.035,
       metalness: 0,
       transmission: 1,
-      thickness: 0.45,
+      thickness: 0.6,
       ior: 1.56,
-      attenuationColor: new THREE.Color("#1fae78"),
-      attenuationDistance: 0.95,
+      attenuationColor: new Color("#8fdcb6"),
+      attenuationDistance: 1.6,
       specularIntensity: 1,
       envMapIntensity: 1.3,
       dispersion: 0.25,
-    })
-  );
-}
-
-// ---------------------------------------------------------------- the scene
-export class DialScene {
-  private renderer: THREE.WebGLRenderer;
-  private scene = new THREE.Scene();
-  private camera = new THREE.PerspectiveCamera(26, 1, 0.1, 50);
-  private root = new THREE.Group();
-  private coinPivot = new THREE.Group();
-  private dial = new THREE.Group();
-  private marks: Mark[] = [];
-  private tweens: Tween[] = [];
-  private now = 0;
-  private running = false;
-  private spec: DialSpec;
-  private geo: Record<string, THREE.BufferGeometry>;
-  private mats: Record<string, THREE.Material>;
-  private glowTex: THREE.Texture;
-  private queue: Promise<void> = Promise.resolve();
-
-  constructor(
-    private canvas: HTMLCanvasElement,
-    spec: DialSpec,
-    private opts: DialSceneOptions
-  ) {
-    const lowPower = typeof navigator !== "undefined" && (navigator.hardwareConcurrency ?? 8) <= 4;
-    this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: !opts.background, powerPreference: "high-performance" });
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, lowPower ? 1.5 : 2));
-    this.renderer.outputColorSpace = THREE.SRGBColorSpace;
-    this.renderer.toneMapping = THREE.NeutralToneMapping;
-    if (opts.background) this.renderer.setClearColor(new THREE.Color(opts.background), 1);
-    else this.renderer.setClearColor(0x000000, 0);
-    this.scene.environment = studioEnv(this.renderer, opts.light);
-
-    this.scene.add(this.root);
-    this.coinPivot.add(buildCoin());
-    this.root.add(this.coinPivot, buildBezel(), this.dial);
-    const back = new THREE.Mesh(
-      new THREE.CylinderGeometry(1.3, 1.3, 0.03, 160),
-      new THREE.MeshStandardMaterial({ color: opts.light ? "#e6e2d6" : "#0c1613", roughness: opts.light ? 0.5 : 0.35, metalness: opts.light ? 0 : 0.3 })
-    );
-    back.position.y = -0.17;
-    const shadow = new THREE.Mesh(
-      new THREE.PlaneGeometry(3.6, 3.6),
-      new THREE.MeshBasicMaterial({
-        map: radialTexture([[0, "rgba(0,0,0,0.75)"], [0.55, "rgba(0,0,0,0.35)"], [1, "rgba(0,0,0,0)"]], 256),
-        transparent: true,
-        depthWrite: false,
-        opacity: opts.light ? 0.32 : 0.7,
-        color: 0x000000,
-      })
-    );
-    shadow.rotation.x = -Math.PI / 2;
-    shadow.position.y = -0.2;
-    // fixed lume pip at twelve o'clock: the draw stops a seat under it
-    const tri = new THREE.Shape();
+    });
+    const back = new MeshStandardMaterial({ color: "#0c1613", roughness: 0.35, metalness: 0.3 });
+    const backMesh = new Mesh(new CylinderGeometry(1.32, 1.32, 0.03, 160), back);
+    backMesh.position.y = -0.2;
+    const shadow = new MeshBasicMaterial({
+      map: radialTexture([[0, "rgba(0,0,0,0.75)"], [0.55, "rgba(0,0,0,0.35)"], [1, "rgba(0,0,0,0)"]], 256),
+      transparent: true,
+      depthWrite: false,
+      opacity: 0.7,
+      color: 0x000000,
+    });
+    const shadowMesh = new Mesh(new PlaneGeometry(3.1, 3.1), shadow);
+    shadowMesh.rotation.x = -Math.PI / 2;
+    shadowMesh.position.y = -0.22;
+    // fixed gold pip at twelve o'clock: the draw stops a seat under it
+    const tri = new Shape();
     tri.moveTo(0, 0.99);
     tri.lineTo(-0.03, 0.93);
     tri.lineTo(0.03, 0.93);
     tri.closePath();
-    const pip = new THREE.Mesh(new THREE.ShapeGeometry(tri).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color: LUME, toneMapped: false }));
+    const pip = new Mesh(new ShapeGeometry(tri).rotateX(-Math.PI / 2), new MeshBasicMaterial({ color: PIP, toneMapped: false, transparent: true }));
     pip.position.y = 0.104;
-    this.root.add(back, shadow, pip);
-    const key = new THREE.DirectionalLight(0xfff1de, 1.1);
+    this.root.add(this.coinPivot, new Mesh(bezelGeometry(), glass), backMesh, shadowMesh, pip, this.dial);
+    this.scene.add(this.root);
+    const key = new DirectionalLight(0xfff1de, 1.1);
     key.position.set(-2, 5, 3);
     this.scene.add(key);
+    this.themed = { back, glass, shadow, gold: [field, polish] };
 
+    // Marks sit on the glass as flush points. Transparent materials stay out of the glass's
+    // refraction pass, so a mark never shows twice.
     this.glowTex = radialTexture([
       [0, "rgba(255,255,255,1)"],
       [0.25, "rgba(255,255,255,0.55)"],
       [1, "rgba(255,255,255,0)"],
     ]);
     this.geo = {
-      dome: new THREE.SphereGeometry(0.034, 28, 14, 0, TAU, 0, Math.PI / 2),
-      cup: new THREE.TorusGeometry(0.04, 0.0075, 10, 40).rotateX(Math.PI / 2),
-      open: new THREE.TorusGeometry(0.033, 0.0048, 8, 36).rotateX(Math.PI / 2),
-      you: new THREE.TorusGeometry(0.066, 0.0058, 8, 56).rotateX(Math.PI / 2),
-      ripple: new THREE.TorusGeometry(0.06, 0.006, 6, 48).rotateX(Math.PI / 2),
+      dome: new SphereGeometry(0.032, 28, 14, 0, TAU, 0, Math.PI / 2),
+      ring: new TorusGeometry(0.03, 0.0062, 8, 40).rotateX(Math.PI / 2),
+      lateRing: new TorusGeometry(0.031, 0.0105, 10, 40).rotateX(Math.PI / 2),
+      wonRing: new TorusGeometry(0.047, 0.0042, 8, 44).rotateX(Math.PI / 2),
+      open: new TorusGeometry(0.026, 0.0038, 8, 32).rotateX(Math.PI / 2),
+      you: new TorusGeometry(0.066, 0.0058, 8, 56).rotateX(Math.PI / 2),
+      ripple: new TorusGeometry(0.06, 0.006, 6, 48).rotateX(Math.PI / 2),
     };
+    const flat = (color: Color, opacity = 1) => new MeshBasicMaterial({ color, toneMapped: false, transparent: true, opacity });
     this.mats = {
-      taken: new THREE.MeshPhysicalMaterial({ color: opts.light ? "#dfe5e1" : "#101815", roughness: 0.16, clearcoat: 1, clearcoatRoughness: 0.06 }),
-      lit: new THREE.MeshBasicMaterial({ color: LUME, toneMapped: false }),
-      won: goldMat({ rough: 0.18, color: MARK_GOLD }),
-      late: new THREE.MeshBasicMaterial({ color: SIGNAL, toneMapped: false }),
-      cup: goldMat({ rough: 0.2 }),
-      open: new THREE.MeshBasicMaterial({ color: opts.light ? "#8e9b95" : "#55655e" }),
-      you: goldMat({ rough: 0.14, color: new THREE.Color("#ffe39a") }),
-      glow: new THREE.SpriteMaterial({ map: this.glowTex, color: LUME, blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false, transparent: true, opacity: opts.light ? 0.35 : 0.7 }),
-      glowLate: new THREE.SpriteMaterial({ map: this.glowTex, color: SIGNAL, blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false, transparent: true, opacity: opts.light ? 0.3 : 0.6 }),
+      taken: flat(new Color("#7b8a83"), 0.95),
+      lit: flat(LUME),
+      won: goldMat({ color: MARK_GOLD, rough: 0.18, transparent: true }),
+      late: flat(SIGNAL),
+      open: flat(new Color("#a8b6af"), 0.35),
+      you: goldMat({ color: new Color("#ffe39a"), rough: 0.14, transparent: true }),
+      glow: new SpriteMaterial({ map: this.glowTex, color: LUME, blending: AdditiveBlending, depthWrite: false, toneMapped: false, transparent: true, opacity: 0.7 }),
+      glowLate: new SpriteMaterial({ map: this.glowTex, color: SIGNAL, blending: AdditiveBlending, depthWrite: false, toneMapped: false, transparent: true, opacity: 0.6 }),
     };
-    this.spec = spec;
-    this.build();
+    this.applyTheme("dark");
   }
 
-  // ---------- public
+  get isLost() {
+    return this.lost;
+  }
+
+  // ---------- hosting
+  attach(host: HTMLElement, spec: DialSpec, opts: AttachOptions) {
+    this.host = host;
+    host.appendChild(this.canvas);
+    if (opts.theme !== this.opts.theme) this.applyTheme(opts.theme);
+    this.opts = opts;
+    this.renderer.setClearColor(new Color(opts.theme === "light" ? opts.background : "#000000"), opts.theme === "light" ? 1 : 0);
+    this.tweens = [];
+    this.spinning = false;
+    this.spec = spec;
+    this.dial.rotation.y = 0;
+    this.coinPivot.rotation.set(0, 0, 0);
+    this.coinPivot.position.y = 0;
+    this.build();
+    const r = host.getBoundingClientRect();
+    this.resize(r.width, r.height);
+  }
+
+  detach(host: HTMLElement) {
+    if (this.host !== host) return;
+    this.stopLoop();
+    this.tweens = [];
+    this.spinning = false;
+    if (this.canvas.parentElement === host) host.removeChild(this.canvas);
+    this.host = null;
+  }
+
+  /** Compile shaders off the critical path, then draw the first frame. */
+  async warm() {
+    try {
+      await this.renderer.compileAsync(this.scene, this.camera);
+    } catch {
+      /* compileAsync is an optimisation only */
+    }
+    this.render();
+  }
+
   resize(width: number, height: number) {
     this.renderer.setSize(Math.max(1, width), Math.max(1, height), false);
     this.camera.aspect = Math.max(1, width) / Math.max(1, height);
     this.aim();
-    if (!this.running) this.render();
+    this.render();
   }
 
-  setView(view: DialView) {
-    this.opts.view = view;
-    this.aim();
-    if (!this.running) this.render();
-  }
-
-  start() {
-    if (this.running || this.opts.reducedMotion) return;
-    this.running = true;
-    let last = performance.now();
-    this.renderer.setAnimationLoop((t) => {
-      const dt = Math.min(0.05, (t - last) / 1000);
-      last = t;
-      this.step(dt);
-      if (this.scene.environmentRotation) this.scene.environmentRotation.y += dt * 0.12;
-      this.render();
+  /** Where each seat number sits on screen (0–1), following the current turn. */
+  seatLabels() {
+    this.root.updateMatrixWorld(true);
+    return Array.from({ length: this.spec.seats }, (_, i) => {
+      const a = this.seatAngle(i) - this.dial.rotation.y;
+      const v = new Vector3(1.48 * Math.cos(a), 0.19, 1.48 * Math.sin(a)).project(this.camera);
+      return { x: (v.x + 1) / 2, y: (1 - v.y) / 2 };
     });
-  }
-
-  stop() {
-    this.running = false;
-    this.renderer.setAnimationLoop(null);
   }
 
   /** Move to a new state, animating what changed: C3 seats, C2 a new winner, C1 new payments. */
@@ -443,36 +495,35 @@ export class DialScene {
     return this.queue;
   }
 
-  /** Where each seat number sits on screen, 0–1 in the canvas, following the current turn. */
-  seatLabels() {
-    this.root.updateMatrixWorld(true);
-    return Array.from({ length: this.spec.seats }, (_, i) => {
-      const a = this.seatAngle(i) - this.dial.rotation.y;
-      const v = new THREE.Vector3(1.47 * Math.cos(a), 0.16, 1.47 * Math.sin(a)).project(this.camera);
-      return { x: (v.x + 1) / 2, y: (1 - v.y) / 2 };
-    });
-  }
-
-  dispose() {
-    this.stop();
-    this.tweens = [];
-    this.scene.traverse((o) => {
-      const mesh = o as THREE.Mesh;
-      if (mesh.geometry) mesh.geometry.dispose();
-      const m = mesh.material as THREE.Material | THREE.Material[] | undefined;
-      if (Array.isArray(m)) m.forEach((x) => x.dispose());
-      else m?.dispose();
-    });
-    Object.values(this.geo).forEach((g) => g.dispose());
-    Object.values(this.mats).forEach((m) => m.dispose());
-    this.glowTex.dispose();
-    this.scene.environment?.dispose();
-    this.renderer.dispose();
-    this.renderer.forceContextLoss();
+  /** Keep the bezel turning while a draw is in flight (two approvals and the slot hash). */
+  setDrawing(on: boolean) {
+    if (this.opts.reducedMotion) return;
+    this.spinning = on;
+    if (on) this.startLoop();
   }
 
   // ---------- internals
+  private applyTheme(theme: Theme) {
+    const light = theme === "light";
+    let env = this.envs.get(theme);
+    if (!env) {
+      env = studioEnv(this.renderer, light);
+      this.envs.set(theme, env);
+    }
+    this.scene.environment = env;
+    this.themed.back.color.set(light ? "#0c3b2b" : "#0c1613");
+    this.themed.glass.attenuationColor.set(light ? "#0f7a57" : "#8fdcb6");
+    this.themed.glass.attenuationDistance = light ? 0.9 : 1.6;
+    this.themed.shadow.opacity = light ? 0.32 : 0.7;
+    for (const m of this.themed.gold) m.color.set(light ? "#c8962c" : "#e0b453");
+    (this.mats.taken as MeshBasicMaterial).color.set(light ? "#5b6660" : "#7b8a83");
+    (this.mats.open as MeshBasicMaterial).color.set(light ? "#5b6660" : "#a8b6af");
+    (this.mats.glow as SpriteMaterial).opacity = light ? 0.35 : 0.7;
+    (this.mats.glowLate as SpriteMaterial).opacity = light ? 0.3 : 0.6;
+  }
+
   private render() {
+    if (this.lost || !this.host) return;
     this.renderer.render(this.scene, this.camera);
   }
 
@@ -483,15 +534,35 @@ export class DialScene {
     this.camera.updateProjectionMatrix();
   }
 
+  private startLoop() {
+    if (this.looping || this.lost) return;
+    this.looping = true;
+    let last = performance.now();
+    this.renderer.setAnimationLoop((t) => {
+      const dt = Math.min(0.05, (t - last) / 1000);
+      last = t;
+      this.step(dt);
+      if (this.spinning) this.dial.rotation.y += dt * 2.4;
+      this.render();
+      if (!this.tweens.length && !this.spinning) this.stopLoop();
+    });
+  }
+
+  private stopLoop() {
+    this.looping = false;
+    this.renderer.setAnimationLoop(null);
+  }
+
   private tween(dur: number, fn: (k: number) => void) {
     return new Promise<void>((resolve) => {
-      if (this.opts.reducedMotion || !this.running) {
+      if (this.opts.reducedMotion || !this.host || document.hidden) {
         fn(1);
         resolve();
-        if (!this.running) this.render();
+        this.render();
         return;
       }
       this.tweens.push({ t0: this.now, dur, fn, resolve });
+      this.startLoop();
     });
   }
 
@@ -514,61 +585,65 @@ export class DialScene {
 
   private build(grow = false) {
     this.dial.traverse((o) => {
-      const mesh = o as THREE.Mesh;
-      if (mesh.userData?.ownGeo) mesh.geometry.dispose();
-      if (mesh.userData?.ownMat) (mesh.material as THREE.Material).dispose();
+      const mesh = o as Mesh;
+      if (mesh.userData?.own) {
+        mesh.geometry.dispose();
+        (mesh.material as Material).dispose();
+      }
     });
     this.dial.clear();
     const s = this.spec;
     const n = s.seats;
-    const R = 1.2;
+    const R = 1.19;
     this.marks = [];
     for (let i = 0; i < n; i++) {
       const a = this.seatAngle(i);
-      const g = new THREE.Group() as Mark;
-      g.position.set(R * Math.cos(a), 0.162, R * Math.sin(a));
+      const g = new Group() as MarkGroup;
+      g.position.set(R * Math.cos(a), 0.192, R * Math.sin(a));
       const st = markState(s, i);
-      if (st === "open") {
-        g.add(new THREE.Mesh(this.geo.open, this.mats.open));
+      if (st === "open") g.add(new Mesh(this.geo.open, this.mats.open));
+      else if (st === "taken") g.add(new Mesh(this.geo.ring, this.mats.taken));
+      else if (st === "late") {
+        g.add(new Mesh(this.geo.lateRing, this.mats.late));
+        const glow = new Sprite(this.mats.glowLate as SpriteMaterial);
+        glow.scale.setScalar(0.12);
+        g.add(glow);
       } else {
-        g.add(new THREE.Mesh(this.geo.cup, this.mats.cup));
-        const dome = new THREE.Mesh(this.geo.dome, this.mats[st]);
-        dome.scale.set(1, 0.6, 1);
+        const dome = new Mesh(this.geo.dome, this.mats[st]);
+        dome.scale.set(1, 0.5, 1);
         g.add(dome);
         g.userData.dome = dome;
-        if (st === "lit" || st === "late") {
-          const glow = new THREE.Sprite(st === "lit" ? (this.mats.glow as THREE.SpriteMaterial) : (this.mats.glowLate as THREE.SpriteMaterial));
-          glow.scale.setScalar(0.2);
-          glow.position.y = 0.02;
+        if (st === "won") g.add(new Mesh(this.geo.wonRing, this.mats.won));
+        if (st === "lit") {
+          const glow = new Sprite(this.mats.glow as SpriteMaterial);
+          glow.scale.setScalar(0.14);
+          glow.position.y = 0.012;
           g.add(glow);
         }
       }
-      if (i === s.you) g.add(new THREE.Mesh(this.geo.you, this.mats.you));
+      if (i === s.you) g.add(new Mesh(this.geo.you, this.mats.you));
       if (grow && !this.opts.reducedMotion) g.scale.setScalar(0.01);
       this.dial.add(g);
       this.marks.push(g);
     }
-    // round track: gold done, lume now, dark next
-    const off = new THREE.Color(this.opts.light ? "#b3bfb9" : "#33423c");
+    // round track on the inner edge of the glass: gold done, lume now, dark next
+    const off = new Color(this.opts.theme === "light" ? "#b3bfb9" : "#33423c");
     const gap = Math.min(0.08, TAU / n / 5);
     for (let i = 0; i < n; i++) {
       const len = TAU / n - gap;
-      const geo = new THREE.TorusGeometry(1.075, 0.008, 6, 48, len).rotateX(-Math.PI / 2);
       let col = off;
       if (s.mode === "complete") col = MARK_GOLD;
       else if (s.mode === "active") col = i < (s.round ?? 1) - 1 ? MARK_GOLD : i === (s.round ?? 1) - 1 ? LUME : off;
-      const arc = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ color: col.clone(), toneMapped: false }));
-      arc.userData = { ownGeo: true, ownMat: true };
+      const arc = new Mesh(new TorusGeometry(1.075, 0.008, 6, 48, len).rotateX(-Math.PI / 2), new MeshBasicMaterial({ color: col.clone(), toneMapped: false, transparent: true }));
+      arc.userData = { own: true };
       const start = this.seatAngle(i) - TAU / n / 2 + gap / 2;
       arc.rotation.y = -(start + len);
-      arc.position.y = 0.161;
+      arc.position.y = 0.191;
       this.dial.add(arc);
     }
     this.coinPivot.visible = s.coin !== false;
-    if (grow) {
-      this.marks.forEach((m, i) => this.tween(0.18 + i * 0.012, (k) => m.scale.setScalar(Math.max(0.01, ease.outBack(k)))));
-    }
-    if (!this.running) this.render();
+    if (grow) this.marks.forEach((m, i) => void this.tween(0.18 + i * 0.012, (k) => m.scale.setScalar(Math.max(0.01, ease.outBack(k)))));
+    this.render();
   }
 
   private async transition(next: DialSpec) {
@@ -582,14 +657,14 @@ export class DialScene {
     }
     const newWin = (next.won ?? []).find((i) => !(prev.won ?? []).includes(i));
     if (newWin !== undefined && next.mode !== "pending") {
+      this.spinning = false;
       await this.spinTo(newWin);
       this.spec = next;
       this.build();
       await this.flip();
       return;
     }
-    const litBefore = (i: number) => markState(prev, i) === "lit";
-    const newlyLit = Array.from({ length: next.seats }, (_, i) => i).filter((i) => markState(next, i) === "lit" && !litBefore(i));
+    const newlyLit = Array.from({ length: next.seats }, (_, i) => i).filter((i) => markState(next, i) === "lit" && markState(prev, i) !== "lit");
     this.spec = next;
     this.build();
     for (const i of newlyLit) await this.detent(i);
@@ -605,22 +680,22 @@ export class DialScene {
     const g = this.marks[i];
     const dome = g?.userData.dome;
     if (!g || !dome) return;
-    const flash = new THREE.MeshBasicMaterial({ color: LUME_FLASH.clone(), toneMapped: false });
+    const flash = new MeshBasicMaterial({ color: LUME_FLASH.clone(), toneMapped: false, transparent: true });
     const prevMat = dome.material;
     dome.material = flash;
-    const ripple = new THREE.Mesh(this.geo.ripple, new THREE.MeshBasicMaterial({ color: LUME.clone(), transparent: true, toneMapped: false }));
+    const ripple = new Mesh(this.geo.ripple, new MeshBasicMaterial({ color: LUME.clone(), transparent: true, toneMapped: false }));
     g.add(ripple);
-    this.tick(0.035);
+    void this.tick(0.035);
     await this.tween(0.5, (k) => {
       flash.color.copy(LUME_FLASH).lerp(LUME, smooth(0.25, 1, k));
       ripple.scale.setScalar(1 + 5 * ease.out3(k));
-      (ripple.material as THREE.MeshBasicMaterial).opacity = 1 - k;
+      (ripple.material as MeshBasicMaterial).opacity = 1 - k;
     });
     g.remove(ripple);
-    (ripple.material as THREE.Material).dispose();
+    (ripple.material as Material).dispose();
     dome.material = prevMat;
     flash.dispose();
-    if (!this.running) this.render();
+    this.render();
   }
 
   // C2: spin, slow through detents, stop with the winner under the pip
@@ -629,7 +704,7 @@ export class DialScene {
     const from = this.dial.rotation.y;
     const target = (winner * step) % TAU;
     const delta = (target - (from % TAU) + TAU * 2) % TAU;
-    const total = TAU * 3 + delta;
+    const total = TAU * 2 + delta;
     await this.tween(2.6, (k) => {
       const cont = total * ease.out4(k);
       const q = cont / step;
@@ -646,6 +721,16 @@ export class DialScene {
     });
     this.coinPivot.rotation.x = 0;
     this.coinPivot.position.y = 0;
-    if (!this.running) this.render();
+    this.render();
   }
 }
+
+let engine: DialEngine | null = null;
+
+/** The session's dial engine. Throws if WebGL 2 isn't available; callers keep the SVG then. */
+export function getDialEngine() {
+  if (!engine || engine.isLost) engine = new DialEngine();
+  return engine;
+}
+
+export type { DialEngine };

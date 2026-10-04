@@ -36,13 +36,13 @@ export function Button({
   );
 }
 
-export function SubDial({ label, value, unit, tone }: { label: string; value: ReactNode; unit?: string; tone?: "signal" }) {
+export function SubDial({ label, value, unit, tone }: { label: string; value: ReactNode; unit?: string; tone?: "signal" | "ready" }) {
   return (
-    <div className={cn("bz-subdial", tone === "signal" && "bz-subdial-signal")}>
-      <span className="bz-label text-[7.5px]">{label}</span>
+    <div className={cn("bz-subdial", tone && `bz-subdial-${tone}`)}>
+      <span className="bz-sublabel">{label}</span>
       <b>
         {value}
-        {unit && <small>{unit}</small>}
+        {unit && <small> {unit}</small>}
       </b>
     </div>
   );

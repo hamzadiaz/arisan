@@ -81,7 +81,7 @@ export default function RootLayout({
           <MobileWalletRegistration />
           <SolanaProvider>
             {children}
-            <Toaster position="top-center" />
+            <Toaster position="top-center" offset={{ top: "calc(env(safe-area-inset-top) + 62px)" }} mobileOffset={{ top: "calc(env(safe-area-inset-top) + 62px)" }} />
             <Walkthrough />
           </SolanaProvider>
         </ThemeProvider>

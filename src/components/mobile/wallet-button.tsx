@@ -14,7 +14,7 @@ export function WalletChip() {
     return (
       <button
         onClick={() => setVisible(true)}
-        className="inline-flex h-8 shrink-0 items-center rounded-full bg-[linear-gradient(180deg,var(--cta-1),var(--cta-2))] px-3.5 text-[13px] font-semibold text-[var(--gold-ink)] active:scale-[0.98]"
+        className="bz-hit inline-flex h-8 shrink-0 items-center rounded-full px-3.5 text-[13px] font-semibold text-gold-hi shadow-[inset_0_0_0_1px_color-mix(in_srgb,var(--gold)_55%,transparent)] active:scale-[0.98]"
       >
         {connecting ? "Connecting…" : "Connect"}
       </button>
@@ -27,7 +27,7 @@ export function WalletChip() {
         disconnect();
         toast("Wallet disconnected");
       }}
-      className="inline-flex h-8 shrink-0 items-center gap-2 rounded-full bg-card pl-2.5 pr-3 font-mono text-[12.5px] shadow-[inset_0_0_0_1px_var(--border)] active:scale-[0.98]"
+      className="bz-hit inline-flex h-8 shrink-0 items-center gap-2 rounded-full bg-card pl-2.5 pr-3 font-mono text-[12.5px] shadow-[inset_0_0_0_1px_var(--border)] active:scale-[0.98]"
       aria-label="Disconnect wallet"
     >
       <span aria-hidden="true" className="bz-dot bz-dot-paid size-[7px]" />

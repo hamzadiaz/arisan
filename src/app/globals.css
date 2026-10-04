@@ -52,26 +52,26 @@
   --card-foreground: #121815;
   --popover: #ffffff;
   --popover-foreground: #121815;
-  --primary: #8a6a12;
+  --primary: #7a5c0c;
   --primary-foreground: #1a1408;
   --secondary: #ebe8df;
   --secondary-foreground: #121815;
   --muted: #ebe8df;
   --muted-foreground: #5b6660;
   --accent: #ebe8df;
-  --accent-foreground: #8a6a12;
-  --destructive: #c2482f;
+  --accent-foreground: #7a5c0c;
+  --destructive: #b03e27;
   --border: rgba(18, 24, 21, 0.1);
   --input: rgba(18, 24, 21, 0.16);
-  --ring: #0f8a5f;
+  --ring: #0b7350;
   --gold: #b8922a;
-  --gold-hi: #8a6a12;
+  --gold-hi: #7a5c0c;
   --gold-ink: #1a1408;
   --cta-1: #e2c160;
   --cta-2: #caa133;
-  --glow: #0f8a5f;
+  --glow: #0b7350;
   --emerald: #0f7a57;
-  --signal: #c2482f;
+  --signal: #b03e27;
   --quiet: #8a948f;
   --line-2: rgba(18, 24, 21, 0.18);
   --skel: rgba(18, 24, 21, 0.07);
@@ -80,7 +80,9 @@
   --dial-glow: rgba(184, 146, 42, 0.14);
   --dial-mark-off: #d6ddd9;
   --dial-mark-open: rgba(18, 24, 21, 0.4);
-  --dial-case: #e7e4da;
+  --dial-mark-taken: #5b6660;
+  --dial-case: #0c3b2b;
+  --dial-glass: url(#bz-glass-light);
 }
 
 .dark {
@@ -119,7 +121,9 @@
   --dial-glow: rgba(212, 175, 55, 0.12);
   --dial-mark-off: #22302a;
   --dial-mark-open: rgba(231, 239, 228, 0.45);
+  --dial-mark-taken: #7b8a83;
   --dial-case: #0d1512;
+  --dial-glass: url(#bz-glass);
 }
 
 @layer base {
@@ -313,6 +317,36 @@
     color: var(--signal);
   }
 
+  .bz-subdial-ready b {
+    color: var(--gold-hi);
+  }
+
+  .bz-sublabel {
+    font-size: 11px;
+    line-height: 1;
+    font-weight: 600;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: var(--muted-foreground);
+  }
+
+  /* a confirmed state is not a dead button */
+  .bz-button-done {
+    color: var(--glow);
+    background: color-mix(in srgb, var(--emerald) 16%, var(--card));
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--glow) 30%, transparent);
+  }
+
+  .bz-hit {
+    position: relative;
+  }
+
+  .bz-hit::after {
+    content: "";
+    position: absolute;
+    inset: -6px;
+  }
+
   .bz-dot {
     display: inline-block;
     width: 8px;
@@ -321,24 +355,26 @@
     border-radius: 50%;
   }
 
+  /* status dots differ by shape as well as color: paid filled, due hollow, won ringed, off outlined */
   .bz-dot-paid {
     background: var(--glow);
-    box-shadow: 0 0 8px color-mix(in srgb, var(--glow) 70%, transparent);
   }
 
-  .bz-dot-due,
+  .bz-dot-due {
+    box-shadow: inset 0 0 0 1.6px var(--signal);
+  }
+
   .bz-dot-late {
     background: var(--signal);
-    box-shadow: 0 0 8px color-mix(in srgb, var(--signal) 60%, transparent);
   }
 
   .bz-dot-won {
     background: var(--gold);
-    box-shadow: 0 0 8px color-mix(in srgb, var(--gold) 60%, transparent);
+    box-shadow: 0 0 0 1.5px var(--background), 0 0 0 2.6px var(--gold);
   }
 
   .bz-dot-off {
-    background: var(--dial-mark-off);
+    box-shadow: inset 0 0 0 1.5px var(--quiet);
   }
 
   .bz-status {
@@ -387,7 +423,7 @@
     padding: 6px 8px;
     border-radius: 999px;
     font-family: var(--font-label);
-    font-size: 8.5px;
+    font-size: 10px;
     line-height: 1;
     letter-spacing: 0.14em;
     text-transform: uppercase;
@@ -455,7 +491,7 @@
 
   .bz-seg button {
     display: flex;
-    height: 38px;
+    height: 40px;
     align-items: center;
     justify-content: center;
     gap: 7px;
@@ -581,6 +617,12 @@
     opacity: 0.35;
   }
 
+  .bz-step::after {
+    content: "";
+    position: absolute;
+    inset: -6px;
+  }
+
   .bz-ticks {
     position: absolute;
     left: 48px;
@@ -610,7 +652,6 @@
     height: 24px;
     margin-top: -3px;
     background: var(--gold);
-    box-shadow: 0 0 10px color-mix(in srgb, var(--gold) 60%, transparent);
   }
 
   .bz-ruler-range {
@@ -635,7 +676,7 @@
     position: absolute;
     transform: translateX(-50%);
     font-family: var(--font-label);
-    font-size: 8.5px;
+    font-size: 10px;
     color: var(--muted-foreground);
   }
 
@@ -654,7 +695,7 @@
   .dial-glow::before {
     content: "";
     position: absolute;
-    inset: -12%;
+    inset: -8%;
     background: radial-gradient(circle at 50% 50%, var(--dial-glow), transparent 64%);
     pointer-events: none;
   }
@@ -663,7 +704,7 @@
     position: absolute;
     transform: translate(-50%, -50%);
     font-family: var(--font-label);
-    font-size: 8.5px;
+    font-size: 10px;
     line-height: 1;
     letter-spacing: 0.04em;
     color: var(--muted-foreground);
@@ -704,7 +745,7 @@
 
   .bz-history .bz-h {
     font-family: var(--font-label);
-    font-size: 8.5px;
+    font-size: 10px;
     letter-spacing: 0.1em;
     color: var(--muted-foreground);
   }

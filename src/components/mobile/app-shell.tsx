@@ -60,12 +60,14 @@ export function AppShell({ title, back, children }: AppShellProps) {
         </div>
       </header>
 
-      <main className="flex-1 px-4 pb-[calc(6rem+env(safe-area-inset-bottom))] pt-1">{children}</main>
+      <main className="flex-1 overflow-x-clip px-4 pb-[calc(6rem+env(safe-area-inset-bottom))] pt-1">{children}</main>
 
       <nav className="fixed inset-x-0 bottom-0 z-40 mx-auto w-full max-w-[480px] bg-background/92 pb-[env(safe-area-inset-bottom)] shadow-[inset_0_1px_0_var(--border)] backdrop-blur-xl">
         <ul className="grid grid-cols-3">
           {NAV.map(({ href, label, icon }) => {
-            const active = href === "/" ? pathname === "/" : pathname.startsWith(href);
+            // A circle's own page belongs to Home: that's where its card lives.
+            const onCircle = pathname.startsWith("/pools/") && pathname !== "/pools/create";
+            const active = href === "/" ? pathname === "/" || onCircle : pathname.startsWith(href);
             return (
               <li key={href}>
                 <Link
@@ -77,7 +79,7 @@ export function AppShell({ title, back, children }: AppShellProps) {
                     active ? "text-primary" : "text-muted-foreground"
                   )}
                 >
-                  {active && <span aria-hidden="true" className="absolute top-0 h-0.5 w-[18px] rounded-full bg-gold shadow-[0_0_8px_var(--gold)]" />}
+                  {active && <span aria-hidden="true" className="absolute top-0 h-0.5 w-[18px] rounded-full bg-gold" />}
                   <Icon name={icon} className="size-[25px]" />
                   {label}
                 </Link>
@@ -124,13 +126,6 @@ export function SecondaryButton({ className, ...props }: React.ButtonHTMLAttribu
   return <button {...props} className={cn("bz-button bz-button-ghost", className)} />;
 }
 
-const STATUS_TONE: Record<string, "gold" | "green" | "muted"> = {
-  pending: "gold",
-  active: "green",
-  completed: "muted",
-  cancelled: "muted",
-};
-
 const STATUS_LABELS: Record<string, string> = {
   pending: "Filling",
   active: "Active",
@@ -138,8 +133,16 @@ const STATUS_LABELS: Record<string, string> = {
   cancelled: "Cancelled",
 };
 
+// Status reads the same everywhere: a dot whose shape says the state, then the word.
+const STATUS_DOT: Record<string, "paid" | "off" | "won"> = { pending: "off", active: "paid", completed: "won", cancelled: "off" };
+
 export function StatusPill({ status }: { status: string }) {
-  return <span className={cn("bz-pill", `bz-pill-${STATUS_TONE[status] ?? "muted"}`)}>{STATUS_LABELS[status] ?? status}</span>;
+  return (
+    <span className="bz-status">
+      <span aria-hidden="true" className={cn("bz-dot", `bz-dot-${STATUS_DOT[status] ?? "off"}`)} />
+      {STATUS_LABELS[status] ?? status}
+    </span>
+  );
 }
 
 export function RoundBar({ round, total }: { round: number; total: number }) {
