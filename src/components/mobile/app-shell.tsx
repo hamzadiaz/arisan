@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { ThemeToggle } from "@/components/layout/theme-toggle";
 import { WalletChip } from "@/components/mobile/wallet-button";
@@ -28,6 +28,15 @@ interface AppShellProps {
 export function AppShell({ title, back, children }: AppShellProps) {
   const pathname = usePathname();
   const router = useRouter();
+  // A hairline under the header once content scrolls beneath it
+  const [scrolled, setScrolled] = useState(false);
+
+  useEffect(() => {
+    const read = () => setScrolled(window.scrollY > 4);
+    read();
+    window.addEventListener("scroll", read, { passive: true });
+    return () => window.removeEventListener("scroll", read);
+  }, []);
 
   useEffect(() => {
     if (pathname !== lastPath) {
@@ -38,12 +47,17 @@ export function AppShell({ title, back, children }: AppShellProps) {
 
   return (
     <div className="mx-auto flex min-h-dvh w-full max-w-[480px] flex-col bg-background">
-      <header className="sticky top-0 z-40 bg-background/88 pt-[env(safe-area-inset-top)] backdrop-blur-xl">
+      <header
+        className={cn(
+          "sticky top-0 z-40 bg-background/88 pt-[env(safe-area-inset-top)] backdrop-blur-xl transition-shadow",
+          scrolled && "shadow-[inset_0_-1px_0_var(--border)]"
+        )}
+      >
         <div className="flex h-[54px] items-center gap-1.5 pl-4 pr-3.5">
           {back ? (
             <button
               onClick={() => (inAppScreens > 1 ? router.back() : router.push("/"))}
-              className="-ml-2 flex size-10 items-center justify-center rounded-full active:bg-secondary"
+              className="bz-hit -ml-2 flex size-10 items-center justify-center rounded-full active:bg-secondary"
               aria-label="Back"
             >
               <Icon name="back" className="size-6" />
@@ -62,7 +76,7 @@ export function AppShell({ title, back, children }: AppShellProps) {
 
       <main className="flex-1 overflow-x-clip px-4 pb-[calc(6rem+env(safe-area-inset-bottom))] pt-1">{children}</main>
 
-      <nav className="fixed inset-x-0 bottom-0 z-40 mx-auto w-full max-w-[480px] bg-background/92 pb-[env(safe-area-inset-bottom)] shadow-[inset_0_1px_0_var(--border)] backdrop-blur-xl">
+      <nav className="fixed inset-x-0 bottom-0 z-40 mx-auto w-full max-w-[480px] bg-background pb-[env(safe-area-inset-bottom)] shadow-[inset_0_1px_0_var(--border)]">
         <ul className="grid grid-cols-3">
           {NAV.map(({ href, label, icon }) => {
             // A circle's own page belongs to Home: that's where its card lives.
@@ -79,7 +93,7 @@ export function AppShell({ title, back, children }: AppShellProps) {
                     active ? "text-primary" : "text-muted-foreground"
                   )}
                 >
-                  {active && <span aria-hidden="true" className="absolute top-0 h-0.5 w-[18px] rounded-full bg-gold" />}
+                  {active && <span aria-hidden="true" className="absolute top-1 h-0.5 w-[18px] rounded-full bg-gold" />}
                   <Icon name={icon} className="size-[25px]" />
                   {label}
                 </Link>

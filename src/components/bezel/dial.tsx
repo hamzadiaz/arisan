@@ -6,8 +6,8 @@ import type { DialSpec } from "./dial-spec";
 import type { DialEngine, DialView } from "./dial-scene";
 import { MiniDial } from "./mini-dial";
 
-// 3D only on a real GPU: software WebGL (CI's SwiftShader, blocklisted phones) and Save-Data get
-// the SVG dial. `?dial=3d` forces the 3D path for a smoke test, `?dial=svg` forces the SVG.
+// 3D only on a real GPU: software WebGL (CI's SwiftShader, emulators, blocklisted phones) and
+// Save-Data get the SVG dial. `?dial=3d` forces the 3D path for a smoke test, `?dial=svg` the SVG.
 let support: boolean | null = null;
 function supports3D() {
   if (support !== null) return support;
@@ -18,6 +18,12 @@ function supports3D() {
     if (force !== "3d" && nav.connection?.saveData) return (support = false);
     const gl = document.createElement("canvas").getContext("webgl2", force === "3d" ? undefined : { failIfMajorPerformanceCaveat: true });
     support = !!gl;
+    // Headless Chromium and emulators can pass the caveat check on a CPU rasteriser; name it out.
+    if (gl && force !== "3d") {
+      const info = gl.getExtension("WEBGL_debug_renderer_info");
+      const renderer = String(gl.getParameter(info ? info.UNMASKED_RENDERER_WEBGL : gl.RENDERER));
+      if (/swiftshader|llvmpipe|softpipe|lavapipe|software|basic render/i.test(renderer)) support = false;
+    }
     gl?.getExtension("WEBGL_lose_context")?.loseContext();
   } catch {
     support = false;
@@ -26,6 +32,8 @@ function supports3D() {
 }
 
 const walkthroughOpen = () => !!document.querySelector('[data-testid="walkthrough"]');
+// three loads only when a dial is on screen
+const loadScene = () => import("./dial-scene");
 
 interface DialProps {
   spec: DialSpec;
@@ -49,13 +57,17 @@ export function Dial({ spec, size = 280, view = "hero", numerals = false, drawin
   const host = useRef<HTMLDivElement>(null);
   const engine = useRef<DialEngine | null>(null);
   const latest = useRef(spec);
+  const themeNow = useRef<"dark" | "light">("dark");
   const [mode, setMode] = useState<"svg" | "webgl">("svg");
   const [labels, setLabels] = useState<{ x: number; y: number }[] | null>(null);
   const [theme, setTheme] = useState<"dark" | "light" | null>(null);
+  const [attempt, setAttempt] = useState(0);
   const key = JSON.stringify(spec);
+  const hasTheme = theme !== null;
 
   useEffect(() => {
     latest.current = spec;
+    if (theme) themeNow.current = theme;
   });
 
   // Follow what's on screen, not next-themes state (undefined before mount).
@@ -69,30 +81,46 @@ export function Dial({ spec, size = 280, view = "hero", numerals = false, drawin
 
   useEffect(() => {
     const el = host.current;
-    if (!el || !theme || !supports3D()) return;
+    if (!el || !hasTheme || !supports3D()) return;
     let alive = true;
     let waiting: MutationObserver | null = null;
+    let retry: ReturnType<typeof setTimeout> | null = null;
     const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+    // Back to the SVG; after a lost context, try a fresh engine once the page is visible again.
+    const fallBack = (again: boolean) => {
+      if (!alive) return;
+      engine.current = null;
+      setMode("svg");
+      if (again) {
+        retry = setTimeout(() => {
+          if (!alive) return;
+          if (document.hidden) document.addEventListener("visibilitychange", () => alive && setAttempt((n) => n + 1), { once: true });
+          else setAttempt((n) => n + 1);
+        }, 1500);
+      }
+    };
 
     const attach = async () => {
       if (engine.current) return;
-      const { getDialEngine } = await import("./dial-scene");
-      if (!alive) return;
+      // The 3D chunk may not load (offline): the SVG stays
+      const scene = await loadScene().catch(() => null);
+      if (!scene || !alive) return;
       let e: DialEngine;
       try {
-        e = getDialEngine();
+        e = scene.getDialEngine();
       } catch {
         return; // no WebGL after all: the SVG stays
       }
       engine.current = e;
-      e.onLost = () => {
-        if (!alive) return;
-        engine.current = null;
-        setMode("svg");
-      };
-      e.attach(el, latest.current, { theme, view, background: getComputedStyle(document.body).backgroundColor, reducedMotion });
+      e.attach(
+        el,
+        latest.current,
+        { theme: themeNow.current, view, background: getComputedStyle(document.body).backgroundColor, reducedMotion },
+        { onLost: () => fallBack(true), onEvict: () => fallBack(false) }
+      );
       await e.warm();
-      if (!alive) return;
+      if (!alive || engine.current !== e || e.isLost) return;
       setLabels(e.seatLabels());
       setMode("webgl");
     };
@@ -105,7 +133,7 @@ export function Dial({ spec, size = 280, view = "hero", numerals = false, drawin
           return;
         }
         // Don't animate under the intro; attach when it closes.
-        waiting ??= new MutationObserver(() => {
+        if (!waiting) waiting = new MutationObserver(() => {
           if (walkthroughOpen()) return;
           waiting?.disconnect();
           waiting = null;
@@ -126,6 +154,7 @@ export function Dial({ spec, size = 280, view = "hero", numerals = false, drawin
 
     return () => {
       alive = false;
+      if (retry) clearTimeout(retry);
       io.disconnect();
       ro.disconnect();
       waiting?.disconnect();
@@ -133,7 +162,14 @@ export function Dial({ spec, size = 280, view = "hero", numerals = false, drawin
       engine.current = null;
       setMode("svg");
     };
-  }, [theme, view]);
+  }, [hasTheme, view, attempt]);
+
+  // A theme toggle restyles the attached dial in place: no hand-back, no SVG flash.
+  useEffect(() => {
+    const e = engine.current;
+    if (!e || mode !== "webgl" || !theme) return;
+    e.setTheme(theme, getComputedStyle(document.body).backgroundColor);
+  }, [theme, mode]);
 
   useEffect(() => {
     const e = engine.current;
@@ -144,17 +180,23 @@ export function Dial({ spec, size = 280, view = "hero", numerals = false, drawin
   }, [key, mode]);
 
   useEffect(() => {
-    if (mode === "webgl") engine.current?.setDrawing(drawing);
+    const e = engine.current;
+    if (!e || mode !== "webgl") return;
+    void e.setDrawing(drawing).then(() => {
+      if (engine.current === e) setLabels(e.seatLabels());
+    });
   }, [drawing, mode]);
 
   const flat = numerals && mode === "svg" ? flatLabels(spec.seats) : null;
-  const shown = mode === "webgl" ? labels : flat;
+  // The numbers can't follow a free spin; hide them until the bezel settles.
+  const shown = mode === "webgl" ? (drawing ? null : labels) : flat;
 
   return (
     <div
       ref={host}
-      role="img"
+      role={label ? "img" : undefined}
       aria-label={label}
+      aria-hidden={label ? undefined : true}
       data-dial={mode}
       className={cn("dial-glow relative mx-auto aspect-square max-w-full shrink-0", className)}
       style={{ width: size }}

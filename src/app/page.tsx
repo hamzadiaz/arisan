@@ -2,17 +2,22 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { useWallet } from "@solana/wallet-adapter-react";
+import { PublicKey } from "@solana/web3.js";
+import { useConnection, useWallet } from "@solana/wallet-adapter-react";
 import { AppShell, StatusPill } from "@/components/mobile/app-shell";
 import { ConnectWalletButton } from "@/components/mobile/wallet-button";
 import { Dial } from "@/components/bezel/dial";
 import { MiniDial } from "@/components/bezel/mini-dial";
 import { Icon } from "@/components/bezel/icons";
-import { EmptyState, Label, SkeletonDial } from "@/components/bezel/kit";
-import { EMPTY_DIAL, dialFromPoolOnly, type DialSpec } from "@/components/bezel/dial-spec";
-import { useSolanaPoolData } from "@/hooks/use-solana-program";
-import type { FetchedPool } from "@/lib/solana/accounts";
+import { Button, EmptyState, Label, SkeletonDial, Status } from "@/components/bezel/kit";
+import { EMPTY_DIAL, dialFromPool, dialFromPoolOnly, type DialSpec } from "@/components/bezel/dial-spec";
+import { useSolanaPoolActions, useSolanaPoolData } from "@/hooks/use-solana-program";
+import { useBalance } from "@/hooks/use-balance";
+import type { FetchedMember, FetchedPayment, FetchedPool } from "@/lib/solana/accounts";
+import { circleAction, circleFacts } from "@/lib/circle-state";
+import { getPaymentPDA } from "@/lib/solana/program";
 import { formatAmount, timeUntil } from "@/lib/format";
+import { dismissToast, poolToasts, txErrorToast } from "@/lib/solana/transaction-toast";
 
 // Signed out: the dial waits with its seats open.
 const WELCOME_DIAL: DialSpec = { seats: 6, mode: "pending", staked: [0, 1, 2, 3, 4, 5], you: -1 };
@@ -39,10 +44,27 @@ function Welcome() {
 
 function MyCircles() {
   const { getUserPools } = useSolanaPoolData();
+  const { connection } = useConnection();
   const { publicKey } = useWallet();
   const [pools, setPools] = useState<FetchedPool[] | null>(null);
   const [loadFailed, setLoadFailed] = useState(false);
   const [attempt, setAttempt] = useState(0);
+  // Circles where you've paid this round: one read for every active circle's payment PDA
+  const [paid, setPaid] = useState<Set<string> | null>(null);
+
+  useEffect(() => {
+    const active = pools?.filter((p) => p.status === "active") ?? [];
+    if (!publicKey || active.length === 0) return;
+    let cancelled = false;
+    const pdas = active.map((p) => getPaymentPDA(new PublicKey(p.onChainAddress), publicKey, p.currentRound)[0]);
+    connection.getMultipleAccountsInfo(pdas, "confirmed").then(
+      (infos) => !cancelled && setPaid(new Set(active.filter((_, i) => infos[i] !== null).map((p) => p.id))),
+      () => undefined // rows fall back to the circle's own status
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [pools, publicKey, connection]);
 
   useEffect(() => {
     let cancelled = false;
@@ -74,8 +96,8 @@ function MyCircles() {
   if (pools === null && loadFailed) {
     return (
       <EmptyState
-        art={<MiniDial spec={EMPTY_DIAL} className="size-[200px]" />}
-        title="Can't reach Solana"
+        art={<Dial spec={EMPTY_DIAL} size={220} />}
+        title="Can’t reach Solana"
         action={
           <button
             onClick={() => {
@@ -96,7 +118,8 @@ function MyCircles() {
 
   if (pools === null) {
     return (
-      <div aria-busy="true" aria-label="Loading your circles">
+      <div role="status" aria-busy="true">
+        <span className="sr-only">Loading your circles</span>
         <SkeletonDial size={270} />
         <div className="mt-4 flex flex-col items-center gap-2.5">
           <div className="bz-skel h-2.5 w-40 rounded-full" />
@@ -112,7 +135,7 @@ function MyCircles() {
   if (pools.length === 0) {
     return (
       <EmptyState
-        art={<MiniDial spec={EMPTY_DIAL} className="size-[200px]" />}
+        art={<Dial spec={EMPTY_DIAL} size={220} />}
         title="No circles yet"
         action={
           <>
@@ -130,22 +153,9 @@ function MyCircles() {
     );
   }
 
-  const drawIn = next ? timeUntil(next.nextDrawDate) : null;
-
   return (
     <div>
-      {next && (
-        <div className="flex flex-col items-center text-center">
-          <Dial spec={dialFromPoolOnly(next)} size={270} label={`${next.name}, round ${next.currentRound} of ${next.durationMonths}`} />
-          <Label className="mt-1.5">
-            {next.name} · Round {next.currentRound}/{next.durationMonths}
-          </Label>
-          <p className="bz-display mt-1.5">{drawIn ? `Draw in ${drawIn}` : "Draw due"}</p>
-          <Link href={`/pools/${next.id}`} className="bz-button bz-button-gold mt-5">
-            Open circle
-          </Link>
-        </div>
-      )}
+      {next && <NextCircle key={next.id} pool={next} />}
 
       <section className={next ? "mt-7" : ""}>
         <div className="mb-1 flex items-center justify-between px-0.5">
@@ -163,13 +173,99 @@ function MyCircles() {
                     {formatAmount(pool.monthlyAmount, pool.currency)} · {pool.status === "active" ? `R${pool.currentRound}/${pool.durationMonths}` : `${pool.maxMembers} seats`}
                   </span>
                 </span>
-                <StatusPill status={pool.status} />
+                {pool.status === "active" && paid ? (
+                  <Status tone={paid.has(pool.id) ? "paid" : "due"} strong={!paid.has(pool.id)}>
+                    {paid.has(pool.id) ? "Paid" : "Due"}
+                  </Status>
+                ) : (
+                  <StatusPill status={pool.status} />
+                )}
                 <Icon name="chev" className="size-4 text-muted-foreground" />
               </Link>
             </li>
           ))}
         </ul>
       </section>
+    </div>
+  );
+}
+
+// The circle whose draw comes next: its seats on the dial, and the one thing to do in it.
+function NextCircle({ pool }: { pool: FetchedPool }) {
+  const { getPoolMembers, getPoolPayments } = useSolanaPoolData();
+  const { makePayment, isLoading } = useSolanaPoolActions();
+  const { publicKey, connected } = useWallet();
+  const balance = useBalance();
+  // undefined while loading, null if the read failed (the hero then shows the circle only)
+  const [detail, setDetail] = useState<{ members: FetchedMember[]; payments: FetchedPayment[] } | null | undefined>(undefined);
+  const [version, setVersion] = useState(0);
+  const [now, setNow] = useState(() => Date.now());
+
+  useEffect(() => {
+    let cancelled = false;
+    Promise.all([getPoolMembers(pool.id), getPoolPayments(pool.id, pool.currentRound)]).then(
+      ([members, payments]) => !cancelled && setDetail({ members, payments }),
+      (error) => {
+        // The list below still works; the hero stays generic
+        console.error("Failed to load the next circle:", error);
+        if (!cancelled) setDetail((d) => d ?? null);
+      }
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [pool.id, pool.currentRound, getPoolMembers, getPoolPayments, version]);
+
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 30_000);
+    return () => clearInterval(t);
+  }, []);
+
+  const me = publicKey?.toBase58();
+  const facts = detail ? circleFacts(pool, detail.members, detail.payments, [], me, now) : null;
+  const action = facts ? circleAction(pool, facts, connected) : null;
+  const dial = detail ? dialFromPool(pool, detail.members, detail.payments, [], me) : dialFromPoolOnly(pool);
+  const drawIn = timeUntil(pool.nextDrawDate, now);
+  const amount = formatAmount(pool.monthlyAmount, pool.currency);
+  const short = balance.sol !== null && balance.sol < pool.monthlyAmount + 0.001;
+
+  const pay = async () => {
+    const toastId = poolToasts.makingPayment();
+    const result = await makePayment({ poolAddress: new PublicKey(pool.onChainAddress), round: pool.currentRound });
+    dismissToast(toastId);
+    if (result.success) poolToasts.paymentMade(result.signature!, pool.monthlyAmount, pool.currency, pool.currentRound);
+    else txErrorToast(result.error || "Transaction failed");
+    setVersion((v) => v + 1);
+    balance.refresh();
+  };
+
+  return (
+    <div className="flex flex-col items-center text-center">
+      {/* Mount the dial once its seats are known: a later "new winner" would replay the draw. */}
+      {detail === undefined ? (
+        <SkeletonDial size={270} />
+      ) : (
+        <Dial spec={dial} size={270} label={`${pool.name}, round ${pool.currentRound} of ${pool.durationMonths}`} />
+      )}
+      <Label className="mt-1.5">
+        {pool.name} · Round {pool.currentRound}/{pool.durationMonths}
+      </Label>
+      <p className="bz-display mt-1.5">{drawIn ? `Draw in ${drawIn}` : "Draw due"}</p>
+      {facts && <p className="bz-help mt-1 tabular-nums">{facts.paidCount}/{facts.seated.length} paid this round</p>}
+      {action?.kind === "pay" ? (
+        <>
+          <Button className="mt-5" onClick={pay} busy={isLoading} disabled={short}>
+            {short ? "Not enough SOL" : `Pay ${amount}`}
+          </Button>
+          <Link href={`/pools/${pool.id}`} className="bz-link mt-3 h-11">
+            Open circle
+          </Link>
+        </>
+      ) : (
+        <Link href={`/pools/${pool.id}`} className="bz-button bz-button-gold mt-5">
+          Open circle
+        </Link>
+      )}
     </div>
   );
 }

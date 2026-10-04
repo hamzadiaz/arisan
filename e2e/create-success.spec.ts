@@ -62,9 +62,33 @@ test("Take your seat joins the new circle with the code just shown", async ({ pa
   await expect(page.getByText("Q7K2M9XA")).toBeVisible({ timeout: 20_000 });
 
   await page.getByRole("button", { name: "Take your seat" }).click();
-  await expect(page).toHaveURL(new RegExp(`/pools/${expectedPool.toBase58()}$`), { timeout: 20_000 });
+  // The code is shown only here, so the screen stays: seated, with Share and the code still on it
+  await expect(page.getByRole("button", { name: "You’re seated" })).toBeDisabled({ timeout: 20_000 });
+  await expect(page.getByText("Q7K2M9XA")).toBeVisible();
+  await expect(page).toHaveURL(/\/pools\/create$/);
   const ixs = await signRequests(page);
   expect(ixs.map((ix) => ix.name)).toEqual([expect.stringMatching(/^create_?[pP]ool$/), expect.stringMatching(/^join_?[pP]ool$/)]);
+  // The join carries the code that was shown
+  expect((ixs[1].data as { invite_code?: string; inviteCode?: string }).invite_code ?? (ixs[1].data as { inviteCode?: string }).inviteCode).toBe("Q7K2M9XA");
+
+  await page.getByRole("button", { name: "Open circle" }).click();
+  await expect(page).toHaveURL(new RegExp(`/pools/${expectedPool.toBase58()}$`));
+});
+
+test("Automatic draws create an auto circle, and its seat takes the stake on join", async ({ page }) => {
+  await installMockWallet(page, { sends: true });
+  await mockRpcWithPool(page, { sentTx: { indexedAfter: 1, returnData: "Q7K2M9XA" } });
+  await gotoReady(page, "/pools/create");
+  await connectMockWallet(page);
+  await page.getByPlaceholder("Family circle").fill("Office lunch");
+  await page.getByPlaceholder("0.5").fill("0.25");
+  await page.getByRole("button", { name: "Automatic", exact: true }).click();
+  await expect(page.getByText("Starts when full, draws on its own")).toBeVisible();
+  await page.getByRole("button", { name: "Create circle" }).click();
+
+  await expect(page.getByRole("button", { name: "Take your seat · 0.25 SOL stake" })).toBeVisible({ timeout: 20_000 });
+  const [create] = await signRequests(page);
+  expect((create.data as { auto_mode?: boolean; autoMode?: boolean }).auto_mode ?? (create.data as { autoMode?: boolean }).autoMode).toBe(true);
 });
 
 test("if the code never comes back the screen says so, and invents nothing", async ({ page }) => {
@@ -74,7 +98,7 @@ test("if the code never comes back the screen says so, and invents nothing", asy
   await createPool(page);
 
   await expect(page.locator("header h1")).toHaveText("Circle created", { timeout: 40_000 });
-  await expect(page.getByText("Couldn't read the invite code.")).toBeVisible();
+  await expect(page.getByText("Couldn’t read the invite code.")).toBeVisible();
   await expect(page.getByText("Shown once.")).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Open circle" })).toBeVisible();
 });

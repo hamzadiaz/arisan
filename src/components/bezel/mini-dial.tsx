@@ -19,7 +19,7 @@ export function MiniDial({ spec, className }: { spec: DialSpec; className?: stri
     <svg viewBox="0 0 48 48" aria-hidden="true" focusable="false" className={cn("block", className)}>
       <circle cx="24" cy="24" r="19.2" fill="none" style={{ stroke: "var(--dial-glass)" }} strokeWidth="6.4" opacity={0.95} />
       <circle cx="24" cy="24" r="22.5" fill="none" stroke="rgba(190,255,225,.22)" strokeWidth=".5" />
-      <path d="M8.6 15.6A17.6 17.6 0 0 1 18.4 6.6" fill="none" stroke="#fff" strokeWidth="1.1" strokeLinecap="round" opacity={0.5} />
+      <path d="M8.6 15.6A17.6 17.6 0 0 1 18.4 6.6" fill="none" stroke="#fff" strokeWidth=".5" strokeLinecap="round" opacity={0.3} />
       {coin ? (
         <>
           <circle cx="24" cy="24" r="15.3" fill="url(#bz-coin)" />
@@ -30,7 +30,7 @@ export function MiniDial({ spec, className }: { spec: DialSpec; className?: stri
       ) : (
         <circle cx="24" cy="24" r="15.3" style={{ fill: "var(--dial-case)" }} />
       )}
-      <path d="M24 9.6l-1.1 1.8h2.2z" fill="#f1da92" opacity={coin ? 1 : 0.5} />
+      <path d="M24 9.6l-1.1 1.8h2.2z" fill="#f1da92" />
       {Array.from({ length: n }, (_, i) => {
         const a = -Math.PI / 2 + (i * 2 * Math.PI) / n;
         const x = +(C + 19.2 * Math.cos(a)).toFixed(2);
@@ -38,7 +38,7 @@ export function MiniDial({ spec, className }: { spec: DialSpec; className?: stri
         const st = markState(spec, i);
         return (
           <g key={i}>
-            {st === "open" && <circle cx={x} cy={y} r={r * 0.85} fill="none" style={{ stroke: "var(--dial-mark-open)" }} strokeWidth=".55" strokeDasharray=".9 .9" />}
+            {st === "open" && <circle cx={x} cy={y} r={r * 0.85} fill="none" style={{ stroke: "var(--dial-mark-open)" }} strokeWidth=".55" />}
             {st === "taken" && <circle cx={x} cy={y} r={r * 0.9} fill="none" style={{ stroke: "var(--dial-mark-taken)" }} strokeWidth=".8" />}
             {st === "lit" && (
               <>

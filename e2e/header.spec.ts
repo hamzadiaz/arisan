@@ -1,6 +1,7 @@
 import { test, expect, type Page } from "@playwright/test";
 import {
   MOCK_POOL,
+  MOCK_WALLET,
   MOCK_WALLET_SHORT,
   connectMockWallet,
   gotoReady,
@@ -113,8 +114,12 @@ test.describe("Header with a connected wallet", () => {
     await gotoReady(page, "/pools/create");
     await expect(page.getByRole("button", { name: "Create circle" })).toBeVisible();
 
-    // Chip disconnects
-    await header(page).getByRole("button", { name: "Disconnect wallet" }).click();
+    // The chip opens the wallet sheet: full address, then Disconnect
+    await header(page).getByRole("button", { name: `Wallet ${MOCK_WALLET_SHORT}` }).click();
+    const sheet = page.getByRole("dialog", { name: "Your wallet" });
+    await expect(sheet.getByText(MOCK_WALLET.address)).toBeVisible();
+    await proof(page, "h-wallet-sheet");
+    await sheet.getByRole("button", { name: "Disconnect" }).click();
     await expect(connectChip(page)).toBeVisible();
   });
 
@@ -122,7 +127,7 @@ test.describe("Header with a connected wallet", () => {
     await installMockWallet(page);
     await gotoReady(page, "/");
     await connectMockWallet(page);
-    await expect(page.getByText("Can't reach Solana")).toBeVisible();
+    await expect(page.getByText("Can’t reach Solana")).toBeVisible();
     await expect(page.getByText("No circles yet")).toHaveCount(0);
 
     await mockRpcWithPool(page);

@@ -85,6 +85,13 @@ const VIEWS: Record<DialView, [elevation: number, distance: number]> = {
 
 type Theme = "dark" | "light";
 type Tween = { t0: number; dur: number; fn: (k: number) => void; resolve: () => void };
+/** The Dial currently holding the canvas: told when it loses it. */
+export interface DialOwner {
+  /** The WebGL context was lost; the SVG dial should show. */
+  onLost?: () => void;
+  /** Another Dial took the shared canvas. */
+  onEvict?: () => void;
+}
 type MarkGroup = Group & { userData: { dome?: Mesh } };
 
 // ---------------------------------------------------------------- textures and materials
@@ -281,7 +288,16 @@ class DialEngine {
   private tweens: Tween[] = [];
   private now = 0;
   private looping = false;
+  private raf = 0;
   private spinning = false;
+  /** Bumped on every attach and detach; animations from an older hosting stop touching the dial. */
+  private gen = 0;
+  /** Shaders compiled; nothing renders before, so the first frame never compiles on the main thread. */
+  private ready = false;
+  /** Latest spec waiting for the queue: a ruler drag collapses into one transition. */
+  private pending: DialSpec | null = null;
+  private owner: DialOwner | null = null;
+  private themeApplied: Theme | null = null;
   private spec: DialSpec = { seats: 6, mode: "pending" };
   private opts: AttachOptions = { theme: "dark", view: "hero", background: "#0a0f0d", reducedMotion: false };
   private host: HTMLElement | null = null;
@@ -292,7 +308,6 @@ class DialEngine {
   private themed: { back: MeshStandardMaterial; glass: MeshPhysicalMaterial; shadow: MeshBasicMaterial; gold: MeshStandardMaterial[] };
   private glowTex: Texture;
   private lost = false;
-  onLost?: () => void;
 
   constructor() {
     this.canvas = document.createElement("canvas");
@@ -308,12 +323,22 @@ class DialEngine {
       e.preventDefault();
       this.lost = true;
       this.stopLoop();
-      this.onLost?.();
+      this.finishTweens();
+      const owner = this.owner;
+      this.owner = null;
+      if (this.host && this.canvas.parentElement === this.host) this.host.removeChild(this.canvas);
+      this.host = null;
+      try {
+        this.renderer.dispose();
+      } catch {
+        /* already gone */
+      }
+      owner?.onLost?.();
     });
 
     const hm = hammeredTextures();
-    const gold = new Color("#e0b453");
-    const field = goldMat({ color: gold, rough: 0.5, roughMap: hm.rough, bump: hm.bump, bumpScale: 2.2 });
+    const gold = new Color("#e2bd62");
+    const field = goldMat({ color: gold, rough: 0.58, roughMap: hm.rough, bump: hm.bump, bumpScale: 1.2 });
     const polish = goldMat({ color: gold, rough: 0.16 });
     const edge = goldMat({ color: new Color("#c99a3e"), rough: 0.3, bump: reedTexture(), bumpScale: 1.4 });
     const H = 0.07;
@@ -367,10 +392,10 @@ class DialEngine {
       transmission: 1,
       thickness: 0.6,
       ior: 1.56,
-      attenuationColor: new Color("#8fdcb6"),
-      attenuationDistance: 1.6,
+      attenuationColor: new Color("#2bc58c"),
+      attenuationDistance: 0.8,
       specularIntensity: 1,
-      envMapIntensity: 1.3,
+      envMapIntensity: 0.9,
       dispersion: 0.25,
     });
     const back = new MeshStandardMaterial({ color: "#0c1613", roughness: 0.35, metalness: 0.3 });
@@ -413,7 +438,7 @@ class DialEngine {
       ring: new TorusGeometry(0.03, 0.0062, 8, 40).rotateX(Math.PI / 2),
       lateRing: new TorusGeometry(0.031, 0.0105, 10, 40).rotateX(Math.PI / 2),
       wonRing: new TorusGeometry(0.047, 0.0042, 8, 44).rotateX(Math.PI / 2),
-      open: new TorusGeometry(0.026, 0.0038, 8, 32).rotateX(Math.PI / 2),
+      open: new TorusGeometry(0.034, 0.006, 8, 32).rotateX(Math.PI / 2),
       you: new TorusGeometry(0.066, 0.0058, 8, 56).rotateX(Math.PI / 2),
       ripple: new TorusGeometry(0.06, 0.006, 6, 48).rotateX(Math.PI / 2),
     };
@@ -423,12 +448,11 @@ class DialEngine {
       lit: flat(LUME),
       won: goldMat({ color: MARK_GOLD, rough: 0.18, transparent: true }),
       late: flat(SIGNAL),
-      open: flat(new Color("#a8b6af"), 0.35),
+      open: flat(new Color("#a8b6af"), 0.75),
       you: goldMat({ color: new Color("#ffe39a"), rough: 0.14, transparent: true }),
       glow: new SpriteMaterial({ map: this.glowTex, color: LUME, blending: AdditiveBlending, depthWrite: false, toneMapped: false, transparent: true, opacity: 0.7 }),
       glowLate: new SpriteMaterial({ map: this.glowTex, color: SIGNAL, blending: AdditiveBlending, depthWrite: false, toneMapped: false, transparent: true, opacity: 0.6 }),
     };
-    this.applyTheme("dark");
   }
 
   get isLost() {
@@ -436,14 +460,14 @@ class DialEngine {
   }
 
   // ---------- hosting
-  attach(host: HTMLElement, spec: DialSpec, opts: AttachOptions) {
+  attach(host: HTMLElement, spec: DialSpec, opts: AttachOptions, owner: DialOwner = {}) {
+    if (this.owner && this.host !== host) this.owner.onEvict?.();
+    this.reset();
+    this.owner = owner;
     this.host = host;
     host.appendChild(this.canvas);
-    if (opts.theme !== this.opts.theme) this.applyTheme(opts.theme);
     this.opts = opts;
-    this.renderer.setClearColor(new Color(opts.theme === "light" ? opts.background : "#000000"), opts.theme === "light" ? 1 : 0);
-    this.tweens = [];
-    this.spinning = false;
+    this.applyTheme(opts.theme, opts.background);
     this.spec = spec;
     this.dial.rotation.y = 0;
     this.coinPivot.rotation.set(0, 0, 0);
@@ -455,21 +479,30 @@ class DialEngine {
 
   detach(host: HTMLElement) {
     if (this.host !== host) return;
-    this.stopLoop();
-    this.tweens = [];
-    this.spinning = false;
+    this.reset();
     if (this.canvas.parentElement === host) host.removeChild(this.canvas);
     this.host = null;
+    this.owner = null;
   }
 
   /** Compile shaders off the critical path, then draw the first frame. */
   async warm() {
-    try {
-      await this.renderer.compileAsync(this.scene, this.camera);
-    } catch {
-      /* compileAsync is an optimisation only */
+    if (!this.ready) {
+      try {
+        await this.renderer.compileAsync(this.scene, this.camera);
+      } catch {
+        /* compileAsync is an optimisation only */
+      }
+      this.ready = true;
     }
     this.render();
+  }
+
+  /** Follow a theme change in place, without handing the canvas back. */
+  setTheme(theme: Theme, background: string) {
+    this.opts = { ...this.opts, theme, background };
+    this.applyTheme(theme, background);
+    this.build();
   }
 
   resize(width: number, height: number) {
@@ -484,38 +517,75 @@ class DialEngine {
     this.root.updateMatrixWorld(true);
     return Array.from({ length: this.spec.seats }, (_, i) => {
       const a = this.seatAngle(i) - this.dial.rotation.y;
-      const v = new Vector3(1.48 * Math.cos(a), 0.19, 1.48 * Math.sin(a)).project(this.camera);
+      const r = 1.48 + 0.12 * Math.max(0, Math.sin(a));
+      const v = new Vector3(r * Math.cos(a), 0.19, r * Math.sin(a)).project(this.camera);
       return { x: (v.x + 1) / 2, y: (1 - v.y) / 2 };
     });
   }
 
   /** Move to a new state, animating what changed: C3 seats, C2 a new winner, C1 new payments. */
   update(next: DialSpec) {
-    this.queue = this.queue.then(() => this.transition(next)).catch(() => undefined);
+    const queued = this.pending !== null;
+    this.pending = next;
+    if (!queued) {
+      const gen = this.gen;
+      this.queue = this.queue
+        .then(() => {
+          const spec = this.pending;
+          this.pending = null;
+          if (spec && gen === this.gen) return this.transition(spec);
+        })
+        .catch(() => undefined);
+    }
     return this.queue;
   }
 
-  /** Keep the bezel turning while a draw is in flight (two approvals and the slot hash). */
-  setDrawing(on: boolean) {
-    if (this.opts.reducedMotion) return;
-    this.spinning = on;
-    if (on) this.startLoop();
+  /**
+   * Keep the bezel turning while a draw is in flight (two approvals and the slot hash).
+   * When it stops, the bezel settles on the nearest seat so the numbers line up again;
+   * a new winner's spin, queued by update(), starts from there.
+   */
+  setDrawing(on: boolean): Promise<void> {
+    if (this.opts.reducedMotion) return Promise.resolve();
+    if (on) {
+      this.spinning = true;
+      this.startLoop();
+      return Promise.resolve();
+    }
+    const gen = this.gen;
+    this.queue = this.queue
+      .then(() => {
+        if (gen !== this.gen) return;
+        this.spinning = false;
+        const step = TAU / this.spec.seats;
+        const from = this.dial.rotation.y;
+        const to = Math.round(from / step) * step;
+        if (Math.abs(to - from) < 1e-4) return;
+        return this.tween(0.45, (k) => (this.dial.rotation.y = lerp(from, to, ease.out3(k))));
+      })
+      .catch(() => undefined);
+    return this.queue;
   }
 
   // ---------- internals
-  private applyTheme(theme: Theme) {
+  private applyTheme(theme: Theme, background: string) {
     const light = theme === "light";
+    // Light draws the page colour opaque so the glass refracts the page, not black.
+    this.renderer.setClearColor(new Color(light ? background : "#000000"), light ? 1 : 0);
+    if (theme === this.themeApplied) return;
+    this.themeApplied = theme;
+    // Each theme's studio is built the first time it's needed, not up front.
     let env = this.envs.get(theme);
     if (!env) {
       env = studioEnv(this.renderer, light);
       this.envs.set(theme, env);
     }
     this.scene.environment = env;
-    this.themed.back.color.set(light ? "#0c3b2b" : "#0c1613");
-    this.themed.glass.attenuationColor.set(light ? "#0f7a57" : "#8fdcb6");
-    this.themed.glass.attenuationDistance = light ? 0.9 : 1.6;
+    this.themed.back.color.set(light ? "#11694a" : "#0c1613");
+    this.themed.glass.attenuationColor.set(light ? "#3fcf98" : "#2bc58c");
+    this.themed.glass.attenuationDistance = light ? 1.6 : 0.8;
     this.themed.shadow.opacity = light ? 0.32 : 0.7;
-    for (const m of this.themed.gold) m.color.set(light ? "#c8962c" : "#e0b453");
+    for (const m of this.themed.gold) m.color.set(light ? "#dcb65a" : "#e2bd62");
     (this.mats.taken as MeshBasicMaterial).color.set(light ? "#5b6660" : "#7b8a83");
     (this.mats.open as MeshBasicMaterial).color.set(light ? "#5b6660" : "#a8b6af");
     (this.mats.glow as SpriteMaterial).opacity = light ? 0.35 : 0.7;
@@ -523,8 +593,31 @@ class DialEngine {
   }
 
   private render() {
-    if (this.lost || !this.host) return;
+    if (this.lost || !this.host || !this.ready) return;
     this.renderer.render(this.scene, this.camera);
+  }
+
+  /** Drop the previous hosting's motion: finish its tweens so nothing waits on them forever. */
+  private reset() {
+    this.gen++;
+    this.stopLoop();
+    this.finishTweens();
+    this.queue = Promise.resolve();
+    this.pending = null;
+    this.spinning = false;
+  }
+
+  private finishTweens() {
+    const cut = this.tweens;
+    this.tweens = [];
+    for (const tw of cut) {
+      try {
+        tw.fn(1);
+      } catch {
+        /* the mark it animated may be gone */
+      }
+      tw.resolve();
+    }
   }
 
   private aim() {
@@ -538,19 +631,27 @@ class DialEngine {
     if (this.looping || this.lost) return;
     this.looping = true;
     let last = performance.now();
-    this.renderer.setAnimationLoop((t) => {
+    const frame = (t: number) => {
+      if (!this.looping) return;
       const dt = Math.min(0.05, (t - last) / 1000);
       last = t;
       this.step(dt);
       if (this.spinning) this.dial.rotation.y += dt * 2.4;
       this.render();
-      if (!this.tweens.length && !this.spinning) this.stopLoop();
-    });
+      if (!this.tweens.length && !this.spinning) {
+        this.looping = false;
+        this.raf = 0;
+        return;
+      }
+      this.raf = requestAnimationFrame(frame);
+    };
+    this.raf = requestAnimationFrame(frame);
   }
 
   private stopLoop() {
     this.looping = false;
-    this.renderer.setAnimationLoop(null);
+    if (this.raf) cancelAnimationFrame(this.raf);
+    this.raf = 0;
   }
 
   private tween(dur: number, fn: (k: number) => void) {
@@ -647,18 +748,21 @@ class DialEngine {
   }
 
   private async transition(next: DialSpec) {
+    const gen = this.gen;
     const prev = this.spec;
     if (next.seats !== prev.seats) {
       this.spec = next;
       this.dial.rotation.y = 0;
       this.build(true);
-      await this.tick(0.03);
+      // Skip the wobble while the ruler is still moving
+      if (this.pending === null) await this.tick(0.03);
       return;
     }
     const newWin = (next.won ?? []).find((i) => !(prev.won ?? []).includes(i));
     if (newWin !== undefined && next.mode !== "pending") {
       this.spinning = false;
       await this.spinTo(newWin);
+      if (gen !== this.gen) return;
       this.spec = next;
       this.build();
       await this.flip();
@@ -667,7 +771,10 @@ class DialEngine {
     const newlyLit = Array.from({ length: next.seats }, (_, i) => i).filter((i) => markState(next, i) === "lit" && markState(prev, i) !== "lit");
     this.spec = next;
     this.build();
-    for (const i of newlyLit) await this.detent(i);
+    for (const i of newlyLit) {
+      if (gen !== this.gen) return;
+      await this.detent(i);
+    }
   }
 
   private tick(amount: number) {
@@ -700,23 +807,25 @@ class DialEngine {
 
   // C2: spin, slow through detents, stop with the winner under the pip
   private async spinTo(winner: number) {
+    const gen = this.gen;
     const step = TAU / this.spec.seats;
     const from = this.dial.rotation.y;
     const target = (winner * step) % TAU;
-    const delta = (target - (from % TAU) + TAU * 2) % TAU;
+    const delta = (((target - from) % TAU) + TAU * 2) % TAU;
     const total = TAU * 2 + delta;
     await this.tween(2.6, (k) => {
-      const cont = total * ease.out4(k);
-      const q = cont / step;
+      const abs = from + total * ease.out4(k);
+      const q = abs / step;
       const stepped = step * (Math.floor(q) + smooth(0.62, 1, q - Math.floor(q)));
-      this.dial.rotation.y = from + lerp(cont, stepped, smooth(0.45, 0.8, k));
+      this.dial.rotation.y = lerp(abs, stepped, smooth(0.45, 0.8, k));
     });
-    this.dial.rotation.y = from + total;
+    if (gen === this.gen) this.dial.rotation.y = from + total;
   }
 
+  // A full turn: the gem is only on the top face, so a half turn would end on the plain back.
   private async flip() {
-    await this.tween(0.8, (k) => {
-      this.coinPivot.rotation.x = Math.PI * ease.inOut3(k);
+    await this.tween(1, (k) => {
+      this.coinPivot.rotation.x = TAU * ease.inOut3(k);
       this.coinPivot.position.y = 0.45 * Math.sin(Math.PI * k);
     });
     this.coinPivot.rotation.x = 0;

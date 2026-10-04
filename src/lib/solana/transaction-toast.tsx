@@ -45,14 +45,14 @@ export function transactionToast(
 ): Promise<TransactionResult> {
   const loading = options.loading ?? { title: "Confirm in your wallet" };
   const success = options.success ?? { title: "Confirmed" };
-  const error = options.error ?? { title: "Transaction Failed" };
+  const error = options.error ?? { title: "Transaction failed" };
   return new Promise((resolve) => {
     const toastId = toast.loading(<TxBody title={loading.title ?? "Confirm in your wallet"} line={loading.description} />);
     promise.then((result) => {
       if (result.success) {
         toast.success(<TxBody title={success.title ?? "Confirmed"} line={success.description} signature={result.signature} />, { id: toastId, duration: 5000 });
       } else {
-        toast.error(<TxBody title={error.title ?? "Transaction Failed"} line={result.error || error.description || "Something went wrong"} mono={false} />, {
+        toast.error(<TxBody title={error.title ?? "Transaction failed"} line={result.error || error.description || "Something went wrong"} mono={false} />, {
           id: toastId,
           duration: 5000,
         });
@@ -67,8 +67,8 @@ export function txSuccessToast(signature: string, title: string = "Confirmed", d
   done(title, signature, description);
 }
 
-// Error toast. The title stays "Transaction Failed": the wallet or program message follows it.
-export function txErrorToast(errorMessage: string, title: string = "Transaction Failed") {
+// Error toast. The title stays "Transaction failed": the wallet or program message follows it.
+export function txErrorToast(errorMessage: string, title: string = "Transaction failed") {
   toast.error(<TxBody title={title} line={errorMessage} mono={false} />, { duration: 5000 });
 }
 
@@ -84,7 +84,7 @@ export function walletRequiredToast() {
 
 export const poolToasts = {
   creating: () => confirming("Create circle"),
-  created: (signature: string, _inviteCode?: string) => done("Circle created", signature, undefined, 6000),
+  created: (signature: string) => done("Circle created", signature, undefined, 6000),
 
   joining: () => confirming("Join circle"),
   joined: (signature: string) => done("You joined the circle", signature),
@@ -101,7 +101,22 @@ export const poolToasts = {
   poolStarted: (signature: string) => done("Circle started", signature, "Round 1 is open"),
 
   drawing: () => confirming("Run the draw · approve twice"),
+  finishing: () => confirming("Finish the draw"),
   drawn: (signature: string, round: number) => done(`Round ${round} drawn`, signature, undefined, 6000),
+
+  marking: () => confirming("Mark missed payments"),
+  marked: (signature: string, count: number) =>
+    done(count === 1 ? "Missed payment marked" : `${count} missed payments marked`, signature),
+
+  leaving: () => confirming("Leave circle"),
+  left: (signature: string) => done("You left the circle", signature, "Your stake is back in your wallet"),
+
+  rejoining: () => confirming("Rejoin circle"),
+  rejoined: (signature: string) => done("You’re back in", signature),
+
+  returningStakes: () => confirming("Return stakes"),
+  stakesReturned: (signature: string, count: number) =>
+    done(count === 1 ? "Stake returned" : `${count} stakes returned`, signature, undefined, 6000),
 
   claimingWinnings: () => confirming("Claim the pot"),
   winningsClaimed: (signature: string, amount: number, currency: string) =>
@@ -112,7 +127,7 @@ export const poolToasts = {
     done("Stake returned", signature, `${amount} ${currency} to your wallet`, 6000),
 
   invalidInviteCode: () => toast.error(<TxBody title="Wrong invite code" line="Check the 8 characters and try again." mono={false} />, { duration: 5000 }),
-  joinFailed: (errorMessage: string) => toast.error(<TxBody title="Couldn't join" line={errorMessage} mono={false} />, { duration: 5000 }),
+  joinFailed: (errorMessage: string) => toast.error(<TxBody title="Couldn’t join" line={errorMessage} mono={false} />, { duration: 5000 }),
 };
 
 // Dismiss a specific toast

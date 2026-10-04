@@ -458,3 +458,38 @@ export async function buildRejoinPoolTransaction(
 
   return new Transaction().add(ix);
 }
+
+// ============ Refund All Stakes ============
+
+export interface RefundAllStakesParams {
+  poolAddress: PublicKey;
+  /** Members whose stake is still deposited. One instruction each. */
+  memberWallets: PublicKey[];
+}
+
+export async function buildRefundAllStakesTransaction(
+  program: Program,
+  payer: PublicKey,
+  params: RefundAllStakesParams
+): Promise<Transaction> {
+  const [vaultPDA] = getVaultPDA(params.poolAddress);
+  const transaction = new Transaction();
+
+  for (const memberWallet of params.memberWallets) {
+    const [memberPDA] = getMemberPDA(params.poolAddress, memberWallet);
+    const ix = await program.methods
+      .refundAllStakes()
+      .accounts({
+        payer,
+        pool: params.poolAddress,
+        member: memberPDA,
+        memberWallet,
+        vault: vaultPDA,
+        systemProgram: SystemProgram.programId,
+      })
+      .instruction();
+    transaction.add(ix);
+  }
+
+  return transaction;
+}

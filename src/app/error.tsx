@@ -3,7 +3,7 @@
 import { useEffect } from "react";
 import Link from "next/link";
 import { AppShell } from "@/components/mobile/app-shell";
-import { MiniDial } from "@/components/bezel/mini-dial";
+import { Dial } from "@/components/bezel/dial";
 import { EmptyState } from "@/components/bezel/kit";
 import { EMPTY_DIAL } from "@/components/bezel/dial-spec";
 
@@ -17,7 +17,7 @@ export default function RouteError({ error, reset }: { error: Error & { digest?:
   return (
     <AppShell title="Error" back>
       <EmptyState
-        art={<MiniDial spec={EMPTY_DIAL} className="size-[200px]" />}
+        art={<Dial spec={EMPTY_DIAL} size={220} />}
         title="This screen hit an error"
         action={
           <>
@@ -30,7 +30,7 @@ export default function RouteError({ error, reset }: { error: Error & { digest?:
           </>
         }
       >
-        Try again, or go back Home.
+        Nothing left your wallet.
       </EmptyState>
     </AppShell>
   );

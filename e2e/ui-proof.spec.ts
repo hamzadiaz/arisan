@@ -180,7 +180,8 @@ async function mockRpc(page: Page, accounts: Acc[]) {
           value: (params[0] as string[]).map((k) => (byKey.get(k) ? info(byKey.get(k)!) : null)),
         };
       case "getBalance":
-        return { context, value: 0 };
+        // The connected wallet holds 5 SOL; vaults read as empty
+        return { context, value: params[0] === MOCK_WALLET.address ? 5 * SOL : 0 };
       case "getProgramAccounts": {
         const filters = ((params[1] as { filters?: unknown[] })?.filters ?? []) as {
           memcmp?: { offset: number; bytes: string };

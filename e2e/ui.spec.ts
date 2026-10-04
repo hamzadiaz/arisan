@@ -143,7 +143,7 @@ test.describe("5. Join", () => {
 
     // The app's RPC is unreachable here: that must not read as "wrong code" (E2E-5)
     await find.click();
-    await expect(page.getByRole("alert").filter({ hasText: "Can't reach Solana" })).toBeVisible();
+    await expect(page.getByRole("alert").filter({ hasText: "Can’t reach Solana" })).toBeVisible();
     await expect(page.getByText("No circle with that code.")).toHaveCount(0);
     await proof(page, "05a-join-network-error");
   });
@@ -154,7 +154,7 @@ test.describe("5. Join", () => {
     await page.getByPlaceholder("ABCD1234").fill("ZZZZ9999");
     await page.getByRole("button", { name: "Find circle" }).click();
     await expect(page.getByText("No circle with that code.")).toBeVisible();
-    await expect(page.getByText("Can't reach Solana")).toHaveCount(0);
+    await expect(page.getByText("Can’t reach Solana")).toHaveCount(0);
     await proof(page, "05c-join-no-match");
   });
 
@@ -166,9 +166,11 @@ test.describe("5. Join", () => {
 
     await expect(page.getByText(MOCK_POOL.name)).toBeVisible();
     await expect(page.getByText("Filling")).toBeVisible();
-    await expect(page.getByText("0.5 SOL", { exact: true })).toBeVisible();
-    await expect(page.getByText("2.5 SOL")).toBeVisible(); // pot = 0.5 * 5
-    await expect(page.getByText("Required")).toBeVisible(); // stake
+    const fact = (label: string) => page.locator("dl > div", { hasText: label }).locator("dd");
+    await expect(page.getByText("0.5 SOL", { exact: true }).first()).toBeVisible(); // per round
+    await expect(fact("Seats")).toHaveText("0/5");
+    await expect(fact("Pot")).toHaveText("2.5 SOL"); // 0.5 * 5
+    await expect(fact("Stake")).toHaveText("0.5 SOL"); // 1x the round
     const joinBtn = page.getByRole("button", { name: "Connect wallet to join" });
     await expect(joinBtn).toBeEnabled();
     await proof(page, "05b-join-found");
@@ -193,8 +195,8 @@ test.describe("6. Create", () => {
     await expect(amount).toHaveValue("0.25");
 
     // Members: default 5, bounded to 2..20
-    const fewer = page.getByRole("button", { name: "Fewer members" });
-    const more = page.getByRole("button", { name: "More members" });
+    const fewer = page.getByRole("button", { name: "Fewer seats" });
+    const more = page.getByRole("button", { name: "More seats" });
     await expect(page.getByText("5 rounds")).toBeVisible();
     await more.click();
     await expect(page.getByText("6 rounds")).toBeVisible();
@@ -271,7 +273,7 @@ test.describe("7. Pool detail", () => {
 
   test("an unreachable RPC is reported as a network error with retry (E2E-4)", async ({ page }) => {
     await gotoReady(page, `/pools/${MOCK_POOL.address.toBase58()}`);
-    await expect(page.getByText("Can't reach Solana")).toBeVisible();
+    await expect(page.getByText("Can’t reach Solana")).toBeVisible();
     await expect(page.getByText("Circle not found")).toHaveCount(0);
     await proof(page, "07d-pool-network-error");
 

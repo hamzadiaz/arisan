@@ -117,6 +117,7 @@ export function CodeBoxes({
   readOnly,
   label = "Invite code",
   placeholder = "ABCD1234",
+  describedBy,
 }: {
   value: string;
   onChange?: (raw: string) => void;
@@ -127,6 +128,7 @@ export function CodeBoxes({
   readOnly?: boolean;
   label?: string;
   placeholder?: string;
+  describedBy?: string;
 }) {
   const input = useRef<HTMLInputElement>(null);
   const [focused, setFocused] = useState(false);
@@ -136,22 +138,31 @@ export function CodeBoxes({
   const caret = focused && !readOnly ? Math.min(chars.length, length - 1) : -1;
   return (
     <div className={cn("bz-code", state === "error" && "bz-code-error", state === "found" && "bz-code-found")} onClick={() => input.current?.focus()}>
-      {slots.map((c, i) => (
-        <span key={i} className={cn(i === half && "ml-[10px]", i === caret && "bz-code-caret", !c && "bz-code-empty")} aria-hidden="true">
+      {slots.flatMap((c, i) => [
+        // A spacer column splits the code into two groups of four without narrowing a box
+        ...(i === half ? [<i key="gap" aria-hidden="true" />] : []),
+        <span key={i} className={cn(i === caret && "bz-code-caret", !c && "bz-code-empty")} aria-hidden="true">
           {c || (!focused && !value ? placeholder[i] : "")}
-        </span>
-      ))}
+        </span>,
+      ])}
       <input
         ref={input}
         value={value}
         onChange={(e) => onChange?.(e.target.value)}
-        onKeyDown={(e) => e.key === "Enter" && onEnter?.()}
+        onKeyDown={(e) => e.key === "Enter" && !readOnly && onEnter?.()}
         onFocus={() => setFocused(true)}
         onBlur={() => setFocused(false)}
+        onSelect={(e) => {
+          // The drawn caret sits after the last character; keep the real one there too
+          const el = e.currentTarget;
+          if (el.selectionStart !== el.value.length) el.setSelectionRange(el.value.length, el.value.length);
+        }}
         placeholder={placeholder}
         aria-label={label}
+        aria-invalid={state === "error" || undefined}
+        aria-describedby={describedBy}
         autoCapitalize="characters"
-        autoComplete="one-time-code"
+        autoComplete="off"
         spellCheck={false}
         inputMode="text"
         disabled={disabled}
@@ -164,17 +175,16 @@ export function CodeBoxes({
 
 /** Seat count: a 2–20 ruler with − and + steppers. The steppers keep exact single steps. */
 export function SeatRuler({ value, min = 2, max = 20, onChange, disabled }: { value: number; min?: number; max?: number; onChange: (n: number) => void; disabled?: boolean }) {
-  const pct = ((value - min) / (max - min)) * 100;
   return (
     <div className="bz-ruler">
       <div className="bz-ruler-head">
         <Label>Seats</Label>
         <b>
           {value}
-          <small>{value} rounds</small>
+          <small>seats · {value} rounds</small>
         </b>
       </div>
-      <button type="button" className="bz-step" onClick={() => onChange(Math.max(min, value - 1))} disabled={disabled || value <= min} aria-label="Fewer members">
+      <button type="button" className="bz-step" onClick={() => onChange(Math.max(min, value - 1))} disabled={disabled || value <= min} aria-label="Fewer seats">
         <Icon name="minus" className="size-4" />
       </button>
       <div className="bz-ticks" aria-hidden="true">
@@ -193,9 +203,8 @@ export function SeatRuler({ value, min = 2, max = 20, onChange, disabled }: { va
         disabled={disabled}
         aria-label="Seats"
         className="bz-ruler-range"
-        style={{ ["--pct" as string]: `${pct}%` }}
       />
-      <button type="button" className="bz-step bz-step-r" onClick={() => onChange(Math.min(max, value + 1))} disabled={disabled || value >= max} aria-label="More members">
+      <button type="button" className="bz-step bz-step-r" onClick={() => onChange(Math.min(max, value + 1))} disabled={disabled || value >= max} aria-label="More seats">
         <Icon name="plus" className="size-4" />
       </button>
       <div className="bz-ruler-nums" aria-hidden="true">

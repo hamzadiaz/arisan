@@ -96,7 +96,13 @@ export interface MockMember {
   wallet: PublicKey;
   stakeDeposited?: boolean;
   inGracePeriod?: boolean;
+  /** Seconds from now until the grace period ends. Default one day (grace began a day ago). */
+  graceEndsIn?: number;
+  /** Stake slashed by mark_defaulter. Defaults to inGracePeriod. */
+  inDefault?: boolean;
   isKicked?: boolean;
+  hasWon?: boolean;
+  missedRounds?: number;
 }
 
 export interface MockScenario {
@@ -112,6 +118,14 @@ export interface MockScenario {
   /** For wallets that send: getTransaction answers null this many times, then the
    *  transaction with `returnData` (base64 of the given string). */
   sentTx?: { indexedAfter: number; returnData: string };
+  stakeEnabled?: boolean;
+  autoMode?: boolean;
+  /** Draw randomness committed for the current round at this slot. */
+  committedSlot?: number;
+  /** What getSlot answers. Default 1000. */
+  slot?: number;
+  /** The connected wallet's balance. Default 10 SOL. */
+  walletLamports?: number;
 }
 
 const pda = (seeds: (Buffer | Uint8Array)[]) =>
@@ -128,7 +142,7 @@ async function encodeMockPool(scenario: MockScenario): Promise<Buffer> {
     authority: scenario.authority ?? MOCK_POOL.authority,
     name: [...name],
     max_members: scenario.maxMembers ?? MOCK_POOL.maxMembers,
-    member_count: members.length,
+    member_count: members.filter((m) => !m.isKicked).length,
     contribution_amount: new BN(MOCK_POOL.lamportsPerRound),
     currency: { Sol: {} },
     total_rounds: scenario.maxMembers ?? MOCK_POOL.maxMembers,
@@ -142,13 +156,13 @@ async function encodeMockPool(scenario: MockScenario): Promise<Buffer> {
     token_vault: PublicKey.default,
     created_at: new BN(1_750_000_000),
     pool_index: new BN(0),
-    stake_enabled: true,
+    stake_enabled: scenario.stakeEnabled ?? true,
     grace_period_seconds: new BN(172_800),
-    auto_mode: false,
+    auto_mode: scenario.autoMode ?? false,
     member_wallets: wallets,
     roster_len: members.length,
-    randomness_slot: new BN(0),
-    randomness_round: 0,
+    randomness_slot: new BN(scenario.committedSlot ?? 0),
+    randomness_round: scenario.committedSlot !== undefined && active ? (scenario.currentRound ?? 1) : 0,
   });
 }
 
@@ -168,19 +182,19 @@ export async function mockRpcWithPool(page: Page, scenario: MockScenario = {}) {
       await coder.encode("Member", {
         pool: MOCK_POOL.address,
         wallet: m.wallet,
-        has_won: false,
-        won_round: 0,
+        has_won: m.hasWon ?? false,
+        won_round: m.hasWon ? 1 : 0,
         stake_deposited: m.stakeDeposited ?? false,
         stake_amount: new BN(m.stakeDeposited ? MOCK_POOL.lamportsPerRound : 0),
         payments_made: 0,
         joined_at: new BN(1_750_000_000 + i),
         position: i + 1,
         bump: 255,
-        in_default: m.inGracePeriod ?? false,
+        in_default: m.inDefault ?? m.inGracePeriod ?? false,
         in_grace_period: m.inGracePeriod ?? false,
-        grace_deadline: new BN(m.inGracePeriod ? Math.floor(Date.now() / 1000) + 86_400 : 0),
+        grace_deadline: new BN(m.inGracePeriod ? Math.floor(Date.now() / 1000) + (m.graceEndsIn ?? 86_400) : 0),
         is_kicked: m.isKicked ?? false,
-        missed_rounds: m.inGracePeriod ? 1 : 0,
+        missed_rounds: m.missedRounds ?? (m.inGracePeriod || m.isKicked ? 1 : 0),
       })
     );
   }
@@ -204,6 +218,16 @@ export async function mockRpcWithPool(page: Page, scenario: MockScenario = {}) {
     );
   }
 
+  // SlotHashes holds the committed slot's hash, so a half-done draw can be finished.
+  const sysvars = new Map<string, Buffer>();
+  if (scenario.committedSlot !== undefined) {
+    const slotHashes = Buffer.alloc(8 + 40);
+    slotHashes.writeBigUInt64LE(BigInt(1), 0);
+    slotHashes.writeBigUInt64LE(BigInt(scenario.committedSlot), 8);
+    createHash("sha256").update("slot").digest().copy(slotHashes, 16);
+    sysvars.set("SysvarS1otHashes111111111111111111111111111", slotHashes);
+  }
+
   const toAccount = (data: Buffer) => ({
     data: [data.toString("base64"), "base64"],
     executable: false,
@@ -223,7 +247,7 @@ export async function mockRpcWithPool(page: Page, scenario: MockScenario = {}) {
   const answer = (method: string, params: unknown[]) => {
     switch (method) {
       case "getAccountInfo": {
-        const data = accounts.get(params[0] as string);
+        const data = accounts.get(params[0] as string) ?? sysvars.get(params[0] as string);
         return { context, value: data ? toAccount(data) : null };
       }
       case "getMultipleAccounts":
@@ -235,7 +259,12 @@ export async function mockRpcWithPool(page: Page, scenario: MockScenario = {}) {
           }),
         };
       case "getBalance":
-        return { context, value: 0 };
+        return {
+          context,
+          value: params[0] === MOCK_WALLET.address ? (scenario.walletLamports ?? 10_000_000_000) : 0,
+        };
+      case "getSlot":
+        return scenario.slot ?? 1000;
       case "getProgramAccounts": {
         const filters = ((params[1] as { filters?: unknown[] })?.filters ?? []) as {
           memcmp?: { offset: number; bytes: string };
@@ -420,6 +449,8 @@ export async function connectMockWallet(page: Page) {
   );
   await walletSheet(page).getByRole("button", { name: new RegExp(MOCK_WALLET.name) }).click();
   await expect(page.locator("header").getByText(MOCK_WALLET_SHORT)).toBeVisible();
+  // Let the sheet finish closing so proofs don't catch it mid-fade
+  await expect(page.locator(".wallet-adapter-modal")).toHaveCount(0);
 }
 
 /** Instructions for the Arisan program in every transaction the mock wallet was asked to sign. */

@@ -1,5 +1,16 @@
 import type { FetchedDraw, FetchedMember, FetchedPayment, FetchedPool } from "@/lib/solana/accounts";
 
+// A leave followed by a join can repeat a position; joinedAt and the wallet keep the order stable.
+export const orderedSeats = (members: FetchedMember[]) =>
+  members
+    .slice()
+    .sort(
+      (a, b) =>
+        (a.position ?? 0) - (b.position ?? 0) ||
+        (a.joinedAt?.getTime?.() ?? 0) - (b.joinedAt?.getTime?.() ?? 0) ||
+        a.walletAddress.localeCompare(b.walletAddress)
+    );
+
 /** What the dial shows. Seat indexes are 0-based roster positions. */
 export interface DialSpec {
   seats: number;
@@ -26,8 +37,9 @@ export type MarkState = "open" | "taken" | "lit" | "won" | "late";
 
 export function markState(spec: DialSpec, i: number): MarkState {
   if (spec.open?.includes(i)) return "open";
-  if (spec.mode === "complete" || spec.won?.includes(i)) return "won";
+  // A missed payment outranks a past win: it is the seat's open risk.
   if (spec.late?.includes(i)) return "late";
+  if (spec.mode === "complete" || spec.won?.includes(i)) return "won";
   if (spec.mode === "pending") return spec.staked?.includes(i) ? "lit" : "taken";
   return spec.paid?.includes(i) ? "lit" : "taken";
 }
@@ -43,12 +55,12 @@ export function dialFromPool(
   me?: string
 ): DialSpec {
   const seats = Math.max(pool.maxMembers, members.length);
-  const ordered = members.slice().sort((a, b) => (a.position ?? 0) - (b.position ?? 0));
+  const ordered = orderedSeats(members);
   const seatOf = new Map<string, number>();
   ordered.forEach((m, i) => seatOf.set(m.walletAddress, i));
   const at = (pick: (m: FetchedMember) => boolean) => ordered.flatMap((m, i) => (pick(m) ? [i] : []));
   const paidNow = new Set(payments.filter((p) => p.round === pool.currentRound).map((p) => p.walletAddress));
-  const mode: DialSpec["mode"] = pool.status === "pending" ? "pending" : pool.status === "active" ? "active" : "complete";
+  const mode = dialMode(pool);
   return {
     seats,
     mode,
@@ -56,7 +68,7 @@ export function dialFromPool(
     staked: at((m) => m.stakeDeposited),
     paid: at((m) => paidNow.has(m.walletAddress)),
     won: at((m) => m.hasWon),
-    late: at((m) => m.inGracePeriod || m.inDefault),
+    late: at((m) => m.isKicked || m.inGracePeriod || m.inDefault),
     you: me && seatOf.has(me) ? seatOf.get(me)! : -1,
     round: Math.max(1, pool.currentRound),
   };
@@ -64,6 +76,10 @@ export function dialFromPool(
 
 /** The list-row dial for a pool when members aren't loaded (Home list). */
 export function dialFromPoolOnly(pool: FetchedPool): DialSpec {
-  const mode: DialSpec["mode"] = pool.status === "pending" ? "pending" : pool.status === "active" ? "active" : "complete";
-  return { seats: pool.maxMembers, mode, round: Math.max(1, pool.currentRound), you: -1 };
+  return { seats: pool.maxMembers, mode: dialMode(pool), round: Math.max(1, pool.currentRound), you: -1 };
+}
+
+// Cancelled circles never paid anyone out: draw them as unstarted, not as all-won.
+function dialMode(pool: FetchedPool): DialSpec["mode"] {
+  return pool.status === "active" ? "active" : pool.status === "completed" ? "complete" : "pending";
 }

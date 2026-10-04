@@ -50,6 +50,13 @@ export interface FetchedPool extends Pool {
   onChainAddress: string;
   vaultAddress: string;
   vaultBalance: number;
+  /** Seats taken, excluding kicked members. The pot pays contribution × this. */
+  memberCount: number;
+  /** Stake per member = contribution × this, when stakes are on. */
+  stakeMultiplier: number;
+  /** Round whose draw randomness is committed; equals currentRound mid-draw. */
+  randomnessRound: number;
+  randomnessSlot: number;
 }
 
 export async function fetchPool(
@@ -97,6 +104,10 @@ export async function fetchPool(
       gracePeriodSeconds: pool.gracePeriodSeconds.toNumber(),
       // Auto mode field
       autoMode: pool.autoMode,
+      memberCount: pool.memberCount,
+      stakeMultiplier: pool.stakeMultiplier,
+      randomnessRound: pool.randomnessRound ?? 0,
+      randomnessSlot: pool.randomnessSlot ? pool.randomnessSlot.toNumber() : 0,
     };
   } catch (error) {
     // Check if this is a buffer/deserialization error (likely old pool format)

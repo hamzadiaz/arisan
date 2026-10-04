@@ -55,11 +55,12 @@ const PATHS = {
       <path d="M12 8.5l3.3 2.4-1.3 3.9h-4l-1.3-3.9z" />
     </>
   ),
+  // Hollow seats round a table: solid dots round a disc read as the sun at 16px
   seats: (
     <>
-      <circle cx="12" cy="12" r="4.4" />
+      <circle cx="12" cy="12" r="3.4" />
       {SEAT_DOTS.map(([x, y]) => (
-        <circle key={`${x}-${y}`} className="icon-solid" cx={x} cy={y} r="1.35" />
+        <circle key={`${x}-${y}`} cx={x} cy={y} r="1.75" strokeWidth={1.3} />
       ))}
     </>
   ),

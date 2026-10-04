@@ -32,11 +32,11 @@ test.describe("Create pool transaction", () => {
 
     // Math.floor(4.1 * 1e9) is 4099999999: one lamport short (E2E-8)
     await page.getByPlaceholder("0.5").fill("4.1");
-    await page.getByRole("button", { name: "More members" }).click(); // 6
+    await page.getByRole("button", { name: "More seats" }).click(); // 6
     await page.getByRole("button", { name: "2×", exact: true }).click();
 
     await page.getByRole("button", { name: "Create circle" }).click();
-    await expect(page.getByText("Transaction Failed")).toBeVisible();
+    await expect(page.getByText("Transaction failed")).toBeVisible();
 
     // The form is intact and can be retried
     await expect(name).toHaveValue(kept);
@@ -85,7 +85,7 @@ test.describe("Join pool transaction", () => {
     await page.getByPlaceholder("ABCD1234").fill(MOCK_POOL.inviteCode.toLowerCase());
     await page.getByRole("button", { name: "Find circle" }).click();
     await page.getByRole("button", { name: "Join circle" }).click();
-    await expect(page.getByText("Transaction Failed")).toBeVisible();
+    await expect(page.getByText("Transaction failed")).toBeVisible();
     await expect(page).toHaveURL(/\/join$/);
     await expect(page.getByRole("button", { name: "Join circle" })).toBeEnabled();
 
