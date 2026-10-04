@@ -1,16 +1,23 @@
 import Link from "next/link";
-import { AppShell, Panel } from "@/components/mobile/app-shell";
+import { AppShell } from "@/components/mobile/app-shell";
+import { MiniDial } from "@/components/bezel/mini-dial";
+import { EmptyState } from "@/components/bezel/kit";
+import { EMPTY_DIAL } from "@/components/bezel/dial-spec";
 
 export default function NotFound() {
   return (
     <AppShell title="Not found" back>
-      <Panel className="py-10 text-center">
-        <p className="font-semibold">This page doesn&apos;t exist</p>
-        <p className="mt-1 text-sm text-muted-foreground">Check the link, or start from Home.</p>
-        <Link href="/" className="mt-4 inline-block font-semibold text-primary">
-          Go home
-        </Link>
-      </Panel>
+      <EmptyState
+        art={<MiniDial spec={EMPTY_DIAL} className="size-[200px]" />}
+        title="This page doesn't exist"
+        action={
+          <Link href="/" className="bz-button bz-button-ghost">
+            Go home
+          </Link>
+        }
+      >
+        Check the link, or start from Home.
+      </EmptyState>
     </AppShell>
   );
 }

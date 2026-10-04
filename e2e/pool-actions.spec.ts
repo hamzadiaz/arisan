@@ -66,7 +66,7 @@ test.describe("Pending pool", () => {
       members: [{ wallet: me, stakeDeposited: true }, { wallet: other, stakeDeposited: true }],
     });
     await expect(main(page).getByRole("button", { name: "Waiting for members (2/3)" })).toBeDisabled();
-    await expect(main(page).getByRole("button", { name: "Start pool" })).toHaveCount(0);
+    await expect(main(page).getByRole("button", { name: "Start circle" })).toHaveCount(0);
   });
 
   test("the authority starts a full pool once everyone has staked", async ({ page }) => {
@@ -75,7 +75,7 @@ test.describe("Pending pool", () => {
       maxMembers: 2,
       members: [{ wallet: me, stakeDeposited: true }, { wallet: other, stakeDeposited: true }],
     });
-    await expectSigned(page, "Start pool", /^start_?[pP]ool$/);
+    await expectSigned(page, "Start circle", /^start_?[pP]ool$/);
   });
 });
 
@@ -124,6 +124,44 @@ test.describe("Active pool", () => {
 
   test("a removed member cannot act", async ({ page }) => {
     await openPool(page, active([{ wallet: me, isKicked: true }, { wallet: other, stakeDeposited: true }]));
-    await expect(main(page).getByRole("button", { name: "You were removed from this pool" })).toBeDisabled();
+    await expect(main(page).getByRole("button", { name: "You were removed from this circle" })).toBeDisabled();
   });
 });
+
+test.describe("Draw and refund", () => {
+  const due = (paid: PublicKey[]): MockScenario => ({
+    status: "Active",
+    currentRound: 1,
+    nextDrawIn: -600,
+    members: [
+      { wallet: me, stakeDeposited: true },
+      { wallet: other, stakeDeposited: true },
+    ],
+    paid,
+  });
+
+  test("the draw opens after the deadline once every seat has paid, and commits first", async ({ page }) => {
+    await openPool(page, due([me, other]));
+    await expect(main(page).getByText("Two approvals", { exact: false })).toBeVisible();
+    await expectSigned(page, "Draw now", /^commit_?[dD]raw_?[rR]andomness$/);
+  });
+
+  test("the draw waits for every seat to pay, so stakes are never spent on a pot", async ({ page }) => {
+    await openPool(page, due([me]));
+    await expect(main(page).getByRole("button", { name: "Draw now" })).toHaveCount(0);
+    await expect(main(page).getByRole("button", { name: "Paid for round 1" })).toBeDisabled();
+    await expect(main(page).getByText("The draw opens when every seat has paid (1/2).")).toBeVisible();
+  });
+
+  test("a finished circle gives the stake back", async ({ page }) => {
+    await openPool(page, {
+      status: "Completed",
+      members: [
+        { wallet: me, stakeDeposited: true },
+        { wallet: other, stakeDeposited: true },
+      ],
+    });
+    await expectSigned(page, "Get 0.5 SOL back", /^claim_?[sS]take_?[rR]efund$/);
+  });
+});
+

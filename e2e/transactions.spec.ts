@@ -35,13 +35,13 @@ test.describe("Create pool transaction", () => {
     await page.getByRole("button", { name: "More members" }).click(); // 6
     await page.getByRole("button", { name: "2×", exact: true }).click();
 
-    await page.getByRole("button", { name: "Create pool" }).click();
+    await page.getByRole("button", { name: "Create circle" }).click();
     await expect(page.getByText("Transaction Failed")).toBeVisible();
 
     // The form is intact and can be retried
     await expect(name).toHaveValue(kept);
     await expect(page.getByPlaceholder("0.5")).toHaveValue("4.1");
-    await expect(page.getByRole("button", { name: "Create pool" })).toBeEnabled();
+    await expect(page.getByRole("button", { name: "Create circle" })).toBeEnabled();
 
     const ixs = await signRequests(page);
     expect(ixs).toHaveLength(1);
@@ -71,7 +71,7 @@ test.describe("Create pool transaction", () => {
     await page.getByPlaceholder("Family circle").fill("Tiny");
     await page.getByPlaceholder("0.5").fill("0.0000000001");
     await expect(page.getByPlaceholder("0.5")).toHaveValue("0.000000000");
-    await expect(page.getByRole("button", { name: "Create pool" })).toBeDisabled();
+    await expect(page.getByRole("button", { name: "Create circle" })).toBeDisabled();
     expect(await signRequests(page)).toHaveLength(0);
   });
 });
@@ -83,11 +83,11 @@ test.describe("Join pool transaction", () => {
     await gotoReady(page, "/join");
     await connectMockWallet(page);
     await page.getByPlaceholder("ABCD1234").fill(MOCK_POOL.inviteCode.toLowerCase());
-    await page.getByRole("button", { name: "Find pool" }).click();
-    await page.getByRole("button", { name: "Join pool" }).click();
+    await page.getByRole("button", { name: "Find circle" }).click();
+    await page.getByRole("button", { name: "Join circle" }).click();
     await expect(page.getByText("Transaction Failed")).toBeVisible();
     await expect(page).toHaveURL(/\/join$/);
-    await expect(page.getByRole("button", { name: "Join pool" })).toBeEnabled();
+    await expect(page.getByRole("button", { name: "Join circle" })).toBeEnabled();
 
     const ixs = await signRequests(page);
     expect(ixs).toHaveLength(1);

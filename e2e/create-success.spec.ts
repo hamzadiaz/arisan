@@ -25,7 +25,7 @@ async function createPool(page: import("@playwright/test").Page) {
   await connectMockWallet(page);
   await page.getByPlaceholder("Family circle").fill("Office lunch");
   await page.getByPlaceholder("0.5").fill("0.25");
-  await page.getByRole("button", { name: "Create pool" }).click();
+  await page.getByRole("button", { name: "Create circle" }).click();
 }
 
 test("the invite code is shown once, copies, and opens the pool (E2E-13)", async ({
@@ -38,7 +38,7 @@ test("the invite code is shown once, copies, and opens the pool (E2E-13)", async
   await mockRpcWithPool(page, { sentTx: { indexedAfter: 3, returnData: "Q7K2M9XA" } });
   await createPool(page);
 
-  await expect(page.locator("header h1")).toHaveText("Pool created", { timeout: 20_000 });
+  await expect(page.locator("header h1")).toHaveText("Circle created", { timeout: 20_000 });
   await expect(page.getByRole("heading", { name: "Office lunch" })).toBeVisible();
   await expect(page.getByText("Q7K2M9XA")).toBeVisible();
   await expect(page.getByText("Shown once. Save it now.")).toBeVisible();
@@ -51,8 +51,20 @@ test("the invite code is shown once, copies, and opens the pool (E2E-13)", async
   const ixs = await signRequests(page);
   expect(ixs.map((ix) => ix.name)).toEqual([expect.stringMatching(/^create_?[pP]ool$/)]);
 
-  await page.getByRole("button", { name: "Open pool" }).click();
+  await page.getByRole("button", { name: "Open circle" }).click();
   await expect(page).toHaveURL(new RegExp(`/pools/${expectedPool.toBase58()}$`));
+});
+
+test("Take your seat joins the new circle with the code just shown", async ({ page }) => {
+  await installMockWallet(page, { sends: true });
+  await mockRpcWithPool(page, { sentTx: { indexedAfter: 1, returnData: "Q7K2M9XA" } });
+  await createPool(page);
+  await expect(page.getByText("Q7K2M9XA")).toBeVisible({ timeout: 20_000 });
+
+  await page.getByRole("button", { name: "Take your seat" }).click();
+  await expect(page).toHaveURL(new RegExp(`/pools/${expectedPool.toBase58()}$`), { timeout: 20_000 });
+  const ixs = await signRequests(page);
+  expect(ixs.map((ix) => ix.name)).toEqual([expect.stringMatching(/^create_?[pP]ool$/), expect.stringMatching(/^join_?[pP]ool$/)]);
 });
 
 test("if the code never comes back the screen says so, and invents nothing", async ({ page }) => {
@@ -61,8 +73,8 @@ test("if the code never comes back the screen says so, and invents nothing", asy
   await mockRpcWithPool(page, { sentTx: { indexedAfter: 1_000, returnData: "NEVERSHOWN" } });
   await createPool(page);
 
-  await expect(page.locator("header h1")).toHaveText("Pool created", { timeout: 40_000 });
+  await expect(page.locator("header h1")).toHaveText("Circle created", { timeout: 40_000 });
   await expect(page.getByText("Couldn't read the invite code.")).toBeVisible();
   await expect(page.getByText("Shown once.")).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "Open pool" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Open circle" })).toBeVisible();
 });

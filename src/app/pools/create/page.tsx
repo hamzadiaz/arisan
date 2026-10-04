@@ -2,31 +2,32 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { PublicKey } from "@solana/web3.js";
 import { useWallet } from "@solana/wallet-adapter-react";
 import { useWalletModal } from "@solana/wallet-adapter-react-ui";
-import { Check, Copy, Minus, Plus, Share2 } from "lucide-react";
 import { toast } from "sonner";
-import { AppShell, PrimaryButton, SecondaryButton, Section } from "@/components/mobile/app-shell";
-import { Art } from "@/components/mobile/art";
+import { AppShell } from "@/components/mobile/app-shell";
+import { Dial } from "@/components/bezel/dial";
+import { Icon } from "@/components/bezel/icons";
+import { Button, Label, Note, SeatRuler, Segmented } from "@/components/bezel/kit";
 import { useSolanaPoolActions } from "@/hooks/use-solana-program";
-import { ASSETS } from "@/lib/assets";
 import { clampUtf8, formatAmount, sanitizeAmountInput } from "@/lib/format";
 import { poolToasts, txErrorToast, dismissToast } from "@/lib/solana/transaction-toast";
-import { cn } from "@/lib/utils";
 
 const MIN_MEMBERS = 2;
 const MAX_MEMBERS = 20;
 // The program stores the name in 32 bytes and rejects longer UTF-8, not 32 characters.
 const NAME_MAX_BYTES = 32;
 const SOL_DECIMALS = 9;
+const STAKES = [0, 1, 2, 3] as const;
 
-type Created = { poolAddress: string; inviteCode?: string; name: string };
+type Created = { poolAddress: string; inviteCode?: string; name: string; seats: number };
 
 export default function CreatePoolPage() {
   const [created, setCreated] = useState<Created | null>(null);
 
   return (
-    <AppShell title={created ? "Pool created" : "New pool"} back>
+    <AppShell title={created ? "Circle created" : "New circle"} back>
       {created ? <InviteOnce created={created} /> : <CreateForm onCreated={setCreated} />}
     </AppShell>
   );
@@ -41,10 +42,10 @@ function CreateForm({ onCreated }: { onCreated: (c: Created) => void }) {
   const [members, setMembers] = useState(5);
   const [amount, setAmount] = useState("");
   const [stake, setStake] = useState<0 | 1 | 2 | 3>(1);
+
   const stakeEnabled = stake > 0;
   const stakeMultiplier = (stake || 1) as 1 | 2 | 3;
   const currency = "SOL" as const;
-
   const value = parseFloat(amount) || 0;
   const nameBytes = new TextEncoder().encode(name.trim()).length;
   const valid = nameBytes > 0 && nameBytes <= NAME_MAX_BYTES && value > 0;
@@ -70,110 +71,84 @@ function CreateForm({ onCreated }: { onCreated: (c: Created) => void }) {
 
     if (result.success && result.poolAddress) {
       poolToasts.created(result.signature!);
-      onCreated({ poolAddress: result.poolAddress, inviteCode: result.inviteCode, name: name.trim() });
+      onCreated({ poolAddress: result.poolAddress, inviteCode: result.inviteCode, name: name.trim(), seats: members });
     } else {
-      txErrorToast(result.error || "Could not create pool");
+      txErrorToast(result.error || "Could not create the circle");
     }
   };
 
   return (
-    <div>
-      <Art src={ASSETS.createPool} className="mx-auto mb-2 size-24" />
-      <Section title="Name">
+    <div className="pt-1">
+      <Dial
+        spec={{ seats: members, mode: "pending", open: Array.from({ length: members }, (_, i) => i) }}
+        size={190}
+        view="create"
+        label={`Preview: a circle with ${members} seats`}
+      />
+
+      <SeatRuler value={members} min={MIN_MEMBERS} max={MAX_MEMBERS} onChange={setMembers} disabled={isLoading} />
+
+      <label className="bz-field mt-4">
+        <Label>Name</Label>
         <input
           value={name}
           onChange={(e) => setName(clampUtf8(e.target.value, NAME_MAX_BYTES))}
           placeholder="Family circle"
-          className="h-12 w-full rounded-xl border border-border bg-card px-4 text-base outline-none focus:border-primary"
           disabled={isLoading}
+          style={{ textAlign: "left" }}
         />
-      </Section>
+      </label>
 
-      <Section title="Per round">
-        <div className="flex h-14 items-center rounded-xl border border-border bg-card px-4 focus-within:border-primary">
-          <input
-            inputMode="decimal"
-            value={amount}
-            onChange={(e) => setAmount(sanitizeAmountInput(e.target.value, SOL_DECIMALS))}
-            placeholder="0.5"
-            className="w-full bg-transparent text-2xl font-semibold tracking-tight tabular-nums outline-none"
-            disabled={isLoading}
-          />
-          <span className="shrink-0 text-sm font-medium text-muted-foreground">SOL</span>
-        </div>
-      </Section>
+      <label className="bz-field mt-2.5">
+        <Label>Per round</Label>
+        <input
+          inputMode="decimal"
+          value={amount}
+          onChange={(e) => setAmount(sanitizeAmountInput(e.target.value, SOL_DECIMALS))}
+          placeholder="0.5"
+          disabled={isLoading}
+          className="tabular-nums"
+        />
+        <span className="bz-label">SOL</span>
+      </label>
 
-      <Section title="Members">
-        <div className="flex h-14 items-center justify-between rounded-xl border border-border bg-card px-1.5">
-          <button
-            onClick={() => setMembers((m) => Math.max(MIN_MEMBERS, m - 1))}
-            disabled={members <= MIN_MEMBERS || isLoading}
-            className="flex size-11 items-center justify-center rounded-lg active:bg-muted disabled:opacity-30"
-            aria-label="Fewer members"
-          >
-            <Minus className="size-5" />
-          </button>
-          <div className="text-center leading-tight">
-            <p className="text-xl font-semibold tabular-nums">{members}</p>
-            <p className="text-[11px] text-muted-foreground">{members} rounds</p>
-          </div>
-          <button
-            onClick={() => setMembers((m) => Math.min(MAX_MEMBERS, m + 1))}
-            disabled={members >= MAX_MEMBERS || isLoading}
-            className="flex size-11 items-center justify-center rounded-lg active:bg-muted disabled:opacity-30"
-            aria-label="More members"
-          >
-            <Plus className="size-5" />
-          </button>
-        </div>
-      </Section>
+      <div className="mb-2 mt-5 flex items-baseline justify-between gap-3 px-1">
+        <Label>Stake</Label>
+        <span className="text-[12px] text-muted-foreground">Returned at the end if you pay every round</span>
+      </div>
+      <Segmented
+        label="Stake"
+        options={STAKES}
+        value={stake}
+        onChange={(v) => setStake(v)}
+        disabled={isLoading}
+        render={(m) => (m === 0 ? "None" : `${m}×`)}
+      />
 
-      <Section
-        title="Stake"
-        action={<span className="text-[13px] text-muted-foreground">Refunded at the end</span>}
-      >
-        <div className="grid grid-cols-4 gap-1 rounded-xl bg-muted p-1">
-          {([0, 1, 2, 3] as const).map((m) => (
-            <button
-              key={m}
-              onClick={() => setStake(m)}
-              disabled={isLoading}
-              aria-pressed={stake === m}
-              className={cn(
-                "h-9 rounded-lg text-sm font-medium transition-colors",
-                stake === m ? "bg-background text-foreground shadow-sm" : "text-muted-foreground"
-              )}
-            >
-              {m === 0 ? "None" : `${m}×`}
-            </button>
-          ))}
-        </div>
-      </Section>
-
-      <div className="mb-4 flex justify-between gap-4 border-t border-border px-1 pt-4">
+      <div className="mt-5 flex justify-between gap-4 px-1">
         <div>
-          <p className="text-[13px] text-muted-foreground">Pot</p>
-          <p className="font-semibold tabular-nums">{formatAmount(value * members, currency)}</p>
+          <p className="bz-label">Pot</p>
+          <p className="mt-1 text-[18px] font-medium tabular-nums">{formatAmount(value * members, currency)}</p>
         </div>
         <div className="text-right">
-          <p className="text-[13px] text-muted-foreground">Stake each</p>
-          <p className="font-semibold tabular-nums">
-            {stakeEnabled ? formatAmount(value * stakeMultiplier, currency) : "None"}
-          </p>
+          <p className="bz-label">Stake each</p>
+          <p className="mt-1 text-[18px] font-medium tabular-nums">{stakeEnabled ? formatAmount(value * stakeMultiplier, currency) : "None"}</p>
         </div>
       </div>
 
-      <PrimaryButton onClick={submit} disabled={isLoading || (connected && !valid)}>
-        {!connected ? "Connect wallet to create" : isLoading ? "Confirm in wallet…" : "Create pool"}
-      </PrimaryButton>
+      <Button className="mt-5" onClick={submit} disabled={connected && !valid} busy={isLoading}>
+        {!connected ? "Connect wallet to create" : "Create circle"}
+      </Button>
     </div>
   );
 }
 
 function InviteOnce({ created }: { created: Created }) {
   const router = useRouter();
+  const { joinPool, isLoading: joining } = useSolanaPoolActions();
   const [copied, setCopied] = useState(false);
   const code = created.inviteCode;
+  const open = () => router.push(`/pools/${created.poolAddress}`);
 
   const copy = async () => {
     if (!code) return;
@@ -185,7 +160,7 @@ function InviteOnce({ created }: { created: Created }) {
 
   const share = async () => {
     if (!code) return;
-    const text = `Join my Arisan savings circle "${created.name}" with code ${code}`;
+    const text = `Join my Arisan circle "${created.name}" with code ${code}`;
     if (navigator.share) {
       await navigator.share({ title: "Arisan invite", text, url: `${window.location.origin}/join` }).catch(() => {});
     } else {
@@ -194,41 +169,65 @@ function InviteOnce({ created }: { created: Created }) {
     }
   };
 
-  return (
-    <div className="flex flex-col gap-3">
-      <div className="px-1 pb-1">
-        <p className="text-[13px] text-muted-foreground">Pool created</p>
-        <h2 className="truncate text-xl font-semibold">{created.name}</h2>
+  // The creator isn't seated by create_pool; joining with the code takes the first seat.
+  const takeSeat = async () => {
+    if (!code) return;
+    const toastId = poolToasts.joining();
+    const result = await joinPool({ poolAddress: new PublicKey(created.poolAddress), inviteCode: code });
+    dismissToast(toastId);
+    if (result.success) {
+      poolToasts.joined(result.signature!);
+      open();
+    } else {
+      txErrorToast(result.error || "Could not take your seat");
+    }
+  };
+
+  const ring = { seats: created.seats, mode: "pending" as const, open: Array.from({ length: created.seats }, (_, i) => i) };
+
+  if (!code) {
+    return (
+      <div className="flex flex-col items-center pt-3 text-center">
+        <Dial spec={ring} size={170} view="create" />
+        <h2 className="bz-title mt-3">Couldn&apos;t read the invite code.</h2>
+        <p className="bz-body mt-1.5 max-w-[30ch]">The circle exists, but nobody can join without the code.</p>
+        <Button className="mt-6" onClick={open}>
+          Open circle
+        </Button>
       </div>
+    );
+  }
 
-      {code ? (
-        <>
-          <button
-            onClick={copy}
-            className="rounded-xl border border-border bg-card px-4 py-5 text-center active:opacity-80"
-          >
-            <p className="font-mono text-3xl font-semibold tracking-[0.25em]">{code}</p>
-            <p className="mt-2 flex items-center justify-center gap-1.5 text-[13px] text-muted-foreground">
-              {copied ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
-              {copied ? "Copied" : "Tap to copy"}
-            </p>
-          </button>
-          <p className="px-1 text-[13px] text-amber-700 dark:text-amber-300">
-            Shown once. Save it now.
-          </p>
+  return (
+    <div className="flex flex-col pt-1">
+      <Dial spec={ring} size={160} view="create" />
+      <h2 className="bz-title mt-2 truncate text-center">{created.name}</h2>
 
-          <PrimaryButton onClick={share} className="mt-2">
-            <Share2 className="size-4" />
-            Share invite
-          </PrimaryButton>
-        </>
-      ) : (
-        <p className="px-1 text-sm text-amber-700 dark:text-amber-300">Couldn&apos;t read the invite code.</p>
-      )}
+      <Label className="mt-5 text-center">Invite code</Label>
+      <button
+        onClick={copy}
+        className="mt-2 flex flex-col items-center rounded-[20px] bg-card px-4 py-4 shadow-[inset_0_0_0_1px_color-mix(in_srgb,var(--gold)_40%,transparent)] active:scale-[0.99]"
+      >
+        <span className="font-mono text-[32px] font-medium tracking-[0.3em] text-gold-hi">{code}</span>
+        <span className="mt-1.5 flex items-center gap-1.5 text-[13px] text-muted-foreground">
+          <Icon name={copied ? "check" : "copy"} className="size-3.5" />
+          {copied ? "Copied" : "Tap to copy"}
+        </span>
+      </button>
 
-      <SecondaryButton onClick={() => router.push(`/pools/${created.poolAddress}`)}>
-        Open pool
-      </SecondaryButton>
+      <Note tone="gold" icon="info" className="mt-3">
+        Shown once. Save it now.
+      </Note>
+
+      <Button className="mt-5" onClick={takeSeat} busy={joining}>
+        Take your seat
+      </Button>
+      <Button tone="ghost" icon="share" className="mt-3" onClick={share}>
+        Share invite
+      </Button>
+      <button onClick={open} className="bz-link mx-auto mt-4 h-11">
+        Open circle
+      </button>
     </div>
   );
 }

@@ -102,8 +102,10 @@ export interface MockMember {
 export interface MockScenario {
   authority?: PublicKey;
   maxMembers?: number;
-  status?: "Pending" | "Active";
+  status?: "Pending" | "Active" | "Completed";
   currentRound?: number;
+  /** Seconds from now to the round's draw deadline (negative = already passed). Default 3 days. */
+  nextDrawIn?: number;
   members?: MockMember[];
   /** Wallets that have paid the current round */
   paid?: PublicKey[];
@@ -132,7 +134,7 @@ async function encodeMockPool(scenario: MockScenario): Promise<Buffer> {
     total_rounds: scenario.maxMembers ?? MOCK_POOL.maxMembers,
     current_round: active ? (scenario.currentRound ?? 1) : 0,
     status: { [scenario.status ?? "Pending"]: {} },
-    next_draw_timestamp: new BN(active ? Math.floor(Date.now() / 1000) + 3 * 86_400 : 0),
+    next_draw_timestamp: new BN(active ? Math.floor(Date.now() / 1000) + (scenario.nextDrawIn ?? 3 * 86_400) : 0),
     invite_code_hash: [...createHash("sha256").update(MOCK_POOL.inviteCode).digest()],
     stake_multiplier: 1,
     bump: 255,

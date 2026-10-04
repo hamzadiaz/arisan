@@ -33,8 +33,8 @@ test.describe("2. Bottom nav", () => {
     await gotoReady(page, "/");
     const tabs = [
       { label: "Home", path: "/", title: "Arisan" },
-      { label: "Create", path: "/pools/create", title: "New pool" },
-      { label: "Join", path: "/join", title: "Join a pool" },
+      { label: "Create", path: "/pools/create", title: "New circle" },
+      { label: "Join", path: "/join", title: "Join a circle" },
     ];
     await expect(nav(page).getByRole("link")).toHaveCount(3);
 
@@ -124,7 +124,7 @@ test.describe("5. Join", () => {
     await context.grantPermissions(["clipboard-read", "clipboard-write"]);
     await gotoReady(page, "/join");
     const input = page.getByPlaceholder("ABCD1234");
-    const find = page.getByRole("button", { name: "Find pool" });
+    const find = page.getByRole("button", { name: "Find circle" });
 
     await expect(input).toBeVisible();
     await expect(find).toBeDisabled();
@@ -144,7 +144,7 @@ test.describe("5. Join", () => {
     // The app's RPC is unreachable here: that must not read as "wrong code" (E2E-5)
     await find.click();
     await expect(page.getByRole("alert").filter({ hasText: "Can't reach Solana" })).toBeVisible();
-    await expect(page.getByText("No pool with that code.")).toHaveCount(0);
+    await expect(page.getByText("No circle with that code.")).toHaveCount(0);
     await proof(page, "05a-join-network-error");
   });
 
@@ -152,8 +152,8 @@ test.describe("5. Join", () => {
     await mockRpcWithPool(page);
     await gotoReady(page, "/join");
     await page.getByPlaceholder("ABCD1234").fill("ZZZZ9999");
-    await page.getByRole("button", { name: "Find pool" }).click();
-    await expect(page.getByText("No pool with that code.")).toBeVisible();
+    await page.getByRole("button", { name: "Find circle" }).click();
+    await expect(page.getByText("No circle with that code.")).toBeVisible();
     await expect(page.getByText("Can't reach Solana")).toHaveCount(0);
     await proof(page, "05c-join-no-match");
   });
@@ -162,7 +162,7 @@ test.describe("5. Join", () => {
     await mockRpcWithPool(page);
     await gotoReady(page, "/join");
     await page.getByPlaceholder("ABCD1234").fill(MOCK_POOL.inviteCode.toLowerCase());
-    await page.getByRole("button", { name: "Find pool" }).click();
+    await page.getByRole("button", { name: "Find circle" }).click();
 
     await expect(page.getByText(MOCK_POOL.name)).toBeVisible();
     await expect(page.getByText("Filling")).toBeVisible();
@@ -251,7 +251,7 @@ test.describe("7. Pool detail", () => {
     page.on("pageerror", (e) => errors.push(e.message));
     await mockRpcWithPool(page);
     await gotoReady(page, "/pools/11111111111111111111111111111112");
-    await expect(page.getByText("Pool not found")).toBeVisible();
+    await expect(page.getByText("Circle not found")).toBeVisible();
     await expect(page.getByRole("link", { name: "Go home" })).toHaveAttribute("href", "/");
     expect(errors).toEqual([]);
     await proof(page, "07b-pool-not-found");
@@ -263,8 +263,8 @@ test.describe("7. Pool detail", () => {
     const errors: string[] = [];
     page.on("pageerror", (e) => errors.push(e.message));
     await gotoReady(page, "/pools/not-a-pool");
-    await expect(page.getByText("Pool not found")).toBeVisible({ timeout: 3_000 });
-    await expect(page.locator("header h1")).toHaveText("Pool");
+    await expect(page.getByText("Circle not found")).toBeVisible({ timeout: 3_000 });
+    await expect(page.locator("header h1")).toHaveText("Circle");
     expect(errors, "no uncaught Non-base58 error").toEqual([]);
     await proof(page, "07c-pool-malformed-id");
   });
@@ -272,7 +272,7 @@ test.describe("7. Pool detail", () => {
   test("an unreachable RPC is reported as a network error with retry (E2E-4)", async ({ page }) => {
     await gotoReady(page, `/pools/${MOCK_POOL.address.toBase58()}`);
     await expect(page.getByText("Can't reach Solana")).toBeVisible();
-    await expect(page.getByText("Pool not found")).toHaveCount(0);
+    await expect(page.getByText("Circle not found")).toHaveCount(0);
     await proof(page, "07d-pool-network-error");
 
     // Network comes back: Try again loads the pool without a reload

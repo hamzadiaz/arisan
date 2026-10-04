@@ -456,7 +456,8 @@ export function useSolanaPoolActions() {
 
   // Commit the draw slot, then pay the member derived from that slot hash.
   const executeDraw = useCallback(
-    async (params: ExecuteDrawParams): Promise<TransactionResult> => {
+    // The hook derives the winner and the member accounts itself; callers give pool and round.
+    async (params: Pick<ExecuteDrawParams, "poolAddress" | "round">): Promise<TransactionResult> => {
       if (!program || !walletAddress) {
         return { success: false, error: "Program not initialized" };
       }

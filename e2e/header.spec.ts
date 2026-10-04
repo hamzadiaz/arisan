@@ -17,11 +17,11 @@ import {
 
 const ROUTES = [
   { path: "/", title: "Arisan", nested: false, slug: "home" },
-  { path: "/pools/create", title: "New pool", nested: true, slug: "create" },
-  { path: "/join", title: "Join a pool", nested: true, slug: "join" },
+  { path: "/pools/create", title: "New circle", nested: true, slug: "create" },
+  { path: "/join", title: "Join a circle", nested: true, slug: "join" },
   { path: `/pools/${MOCK_POOL.address.toBase58()}`, title: MOCK_POOL.name, nested: true, slug: "pool" },
-  { path: "/pools/11111111111111111111111111111112", title: "Pool", nested: true, slug: "pool-missing" },
-  { path: "/pools/not-a-pool", title: "Pool", nested: true, slug: "pool-malformed" },
+  { path: "/pools/11111111111111111111111111111112", title: "Circle", nested: true, slug: "pool-missing" },
+  { path: "/pools/not-a-pool", title: "Circle", nested: true, slug: "pool-malformed" },
   { path: "/does-not-exist", title: "Not found", nested: true, slug: "404" },
 ];
 
@@ -99,7 +99,7 @@ test.describe("Header with a connected wallet", () => {
 
     // Home switches from the welcome screen to "My pools"
     await expect(page.getByText("Savings circles on Solana")).toHaveCount(0);
-    await expect(page.getByText("No pools yet")).toBeVisible();
+    await expect(page.getByText("No circles yet")).toBeVisible();
 
     for (const route of ROUTES.slice(1)) {
       await gotoReady(page, route.path);
@@ -111,7 +111,7 @@ test.describe("Header with a connected wallet", () => {
 
     // Pages ask for the next action, not for a connection
     await gotoReady(page, "/pools/create");
-    await expect(page.getByRole("button", { name: "Create pool" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Create circle" })).toBeVisible();
 
     // Chip disconnects
     await header(page).getByRole("button", { name: "Disconnect wallet" }).click();
@@ -123,10 +123,10 @@ test.describe("Header with a connected wallet", () => {
     await gotoReady(page, "/");
     await connectMockWallet(page);
     await expect(page.getByText("Can't reach Solana")).toBeVisible();
-    await expect(page.getByText("No pools yet")).toHaveCount(0);
+    await expect(page.getByText("No circles yet")).toHaveCount(0);
 
     await mockRpcWithPool(page);
     await page.getByRole("button", { name: "Try again" }).click();
-    await expect(page.getByText("No pools yet")).toBeVisible();
+    await expect(page.getByText("No circles yet")).toBeVisible();
   });
 });

@@ -264,7 +264,7 @@ for (const theme of ["dark", "light"] as const) {
       await mockRpcWithPool(page);
       await gotoReady(page, "/join");
       await page.getByPlaceholder("ABCD1234").fill(MOCK_POOL.inviteCode);
-      await page.getByRole("button", { name: "Find pool" }).click();
+      await page.getByRole("button", { name: "Find circle" }).click();
       await expect(page.getByText(MOCK_POOL.name)).toBeVisible();
       await shot(page, theme, "05-join");
     });

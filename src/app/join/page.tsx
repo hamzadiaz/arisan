@@ -5,10 +5,12 @@ import { useRouter } from "next/navigation";
 import { PublicKey } from "@solana/web3.js";
 import { useWallet } from "@solana/wallet-adapter-react";
 import { useWalletModal } from "@solana/wallet-adapter-react-ui";
-import { AppShell, Panel, PrimaryButton, StatusPill } from "@/components/mobile/app-shell";
-import { Art } from "@/components/mobile/art";
+import { AppShell, StatusPill } from "@/components/mobile/app-shell";
+import { MiniDial } from "@/components/bezel/mini-dial";
+import { Icon } from "@/components/bezel/icons";
+import { Button, CodeBoxes, Label, Note } from "@/components/bezel/kit";
+import { dialFromPoolOnly } from "@/components/bezel/dial-spec";
 import { useSolanaPoolActions, useSolanaPoolData } from "@/hooks/use-solana-program";
-import { ASSETS } from "@/lib/assets";
 import type { FetchedPool } from "@/lib/solana/accounts";
 import { formatAmount } from "@/lib/format";
 import { poolToasts, txErrorToast, dismissToast } from "@/lib/solana/transaction-toast";
@@ -44,6 +46,7 @@ export default function JoinPage() {
   };
 
   const find = async () => {
+    if (code.length !== CODE_LENGTH || searching) return;
     setSearching(true);
     setNotFound(false);
     setLookupFailed(false);
@@ -73,85 +76,82 @@ export default function JoinPage() {
       poolToasts.joined(result.signature!);
       router.push(`/pools/${pool.onChainAddress}`);
     } else {
-      txErrorToast(result.error || "Could not join pool");
+      txErrorToast(result.error || "Could not join this circle");
     }
   };
 
+  const [amount, currency] = pool ? formatAmount(pool.monthlyAmount, pool.currency).split(" ") : ["", ""];
+
   return (
-    <AppShell title="Join a pool" back>
-      {!pool && <Art src={ASSETS.joinCode} className="mx-auto mb-3 size-24" />}
-      <div className="mb-3 flex h-14 items-center gap-2 rounded-xl border border-border bg-card pl-4 pr-1.5 focus-within:border-primary">
-        <input
-          value={code}
-          onChange={(e) => updateCode(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && code.length === CODE_LENGTH && find()}
-          placeholder="ABCD1234"
-          aria-label="Invite code"
-          autoCapitalize="characters"
-          autoComplete="off"
-          spellCheck={false}
-          className="w-full bg-transparent font-mono text-xl font-semibold tracking-[0.2em] uppercase outline-none placeholder:text-muted-foreground/40"
-        />
-        <button
-          onClick={paste}
-          className="h-10 shrink-0 rounded-lg px-3 text-sm font-medium text-primary active:bg-muted"
-        >
-          Paste
-        </button>
-      </div>
-      {notFound && <p className="-mt-1 mb-3 px-1 text-sm text-destructive">No pool with that code.</p>}
-      {lookupFailed && (
-        <p role="alert" className="-mt-1 mb-3 px-1 text-sm text-destructive">
-          Can&apos;t reach Solana. Try again.
-        </p>
-      )}
+    <AppShell title="Join a circle" back>
+      <div className="pt-5">
+        <CodeBoxes value={code} onChange={updateCode} onEnter={find} state={notFound ? "error" : pool ? "found" : "idle"} />
+        <div className="mt-3 flex items-center justify-between gap-3">
+          {notFound ? (
+            <p className="bz-help bz-help-signal m-0">No circle with that code.</p>
+          ) : (
+            <p className="bz-help m-0">From whoever made the circle.</p>
+          )}
+          <button onClick={paste} className="bz-hit inline-flex h-8 shrink-0 items-center gap-1.5 rounded-full bg-card px-3 text-[13px] font-medium shadow-[inset_0_0_0_1px_var(--border)] active:scale-[0.98]">
+            <Icon name="paste" className="size-4" />
+            Paste
+          </button>
+        </div>
 
-      {!pool && (
-        <PrimaryButton onClick={find} disabled={code.length !== CODE_LENGTH || searching}>
-          {searching ? "Looking up…" : "Find pool"}
-        </PrimaryButton>
-      )}
+        {lookupFailed && (
+          <Note tone="signal" icon="offline" className="mt-4">
+            Can&apos;t reach Solana. Try again.
+          </Note>
+        )}
 
-      {pool && (
-        <>
-          <Panel className="mb-3">
-            <div className="flex items-center justify-between gap-2">
-              <p className="truncate font-semibold">{pool.name}</p>
-              <StatusPill status={pool.status} />
+        {!pool && (
+          <Button className="mt-6" onClick={find} disabled={code.length !== CODE_LENGTH} busy={searching} busyLabel="Looking up…">
+            Find circle
+          </Button>
+        )}
+
+        {pool && (
+          <>
+            <div className="mt-5 rounded-[20px] bg-card p-4 shadow-[inset_0_0_0_1px_var(--border)]">
+              <div className="grid grid-cols-[56px_minmax(0,1fr)_auto] items-center gap-3.5">
+                <MiniDial spec={dialFromPoolOnly(pool)} className="size-14" />
+                <div className="min-w-0">
+                  <h2 className="truncate text-[18px] font-semibold tracking-[-0.01em]">{pool.name}</h2>
+                  <p className="mt-0.5 text-[13px] text-muted-foreground">
+                    <span className="font-mono text-foreground">{`${amount} ${currency}`}</span> per round
+                  </p>
+                </div>
+                <StatusPill status={pool.status} />
+              </div>
+              <dl className="mt-4 grid grid-cols-3 gap-2 border-t border-border pt-3.5">
+                <div>
+                  <dt>
+                    <Label>Seats</Label>
+                  </dt>
+                  <dd className="mt-1.5 text-[16px] font-medium tabular-nums">{pool.maxMembers}</dd>
+                </div>
+                <div>
+                  <dt>
+                    <Label>Pot</Label>
+                  </dt>
+                  <dd className="mt-1.5 text-[16px] font-medium tabular-nums">{formatAmount(pool.monthlyAmount * pool.maxMembers, pool.currency)}</dd>
+                </div>
+                <div>
+                  <dt>
+                    <Label>Stake</Label>
+                  </dt>
+                  <dd className="mt-1.5 text-[16px] font-medium">{pool.stakeEnabled ? "Required" : "None"}</dd>
+                </div>
+              </dl>
             </div>
-            <p className="mt-3 text-3xl font-semibold tracking-tight tabular-nums">
-              {formatAmount(pool.monthlyAmount, pool.currency)}
-            </p>
-            <p className="text-[13px] text-muted-foreground">per round</p>
-            <dl className="mt-4 grid grid-cols-3 gap-3 border-t border-border pt-3 text-sm">
-              <div>
-                <dt className="text-[13px] text-muted-foreground">Members</dt>
-                <dd className="font-medium tabular-nums">{pool.maxMembers}</dd>
-              </div>
-              <div>
-                <dt className="text-[13px] text-muted-foreground">Pot</dt>
-                <dd className="font-medium tabular-nums">
-                  {formatAmount(pool.monthlyAmount * pool.maxMembers, pool.currency)}
-                </dd>
-              </div>
-              <div>
-                <dt className="text-[13px] text-muted-foreground">Stake</dt>
-                <dd className="font-medium">{pool.stakeEnabled ? "Required" : "None"}</dd>
-              </div>
-            </dl>
-          </Panel>
 
-          <PrimaryButton onClick={join} disabled={joining || pool.status !== "pending"}>
-            {pool.status !== "pending"
-              ? "Already started"
-              : !connected
-                ? "Connect wallet to join"
-                : joining
-                  ? "Confirm in wallet…"
-                  : "Join pool"}
-          </PrimaryButton>
-        </>
-      )}
+            <Button className="mt-5" onClick={join} disabled={pool.status !== "pending"} busy={joining}>
+              {pool.status !== "pending" ? "Already started" : !connected ? "Connect wallet to join" : "Join circle"}
+            </Button>
+            {pool.status === "pending" && connected && <p className="bz-help text-center">Your wallet asks you to approve. The stake comes after.</p>}
+          </>
+        )}
+      </div>
     </AppShell>
   );
 }

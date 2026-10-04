@@ -42,7 +42,7 @@ export function SubDial({ label, value, unit, tone }: { label: string; value: Re
       <span className="bz-sublabel">{label}</span>
       <b>
         {value}
-        {unit && <small> {unit}</small>}
+        {unit && <small>{unit}</small>}
       </b>
     </div>
   );

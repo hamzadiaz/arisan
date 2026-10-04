@@ -4,12 +4,17 @@ import { use, useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { PublicKey } from "@solana/web3.js";
 import { useConnection, useWallet } from "@solana/wallet-adapter-react";
-import { Check, Crown, ExternalLink, RefreshCw } from "lucide-react";
-import { AppShell, Panel, PrimaryButton, RoundBar, Section, StatusPill } from "@/components/mobile/app-shell";
+import { AppShell, StatusPill } from "@/components/mobile/app-shell";
 import { ConnectWalletButton } from "@/components/mobile/wallet-button";
+import { Dial } from "@/components/bezel/dial";
+import { MiniDial } from "@/components/bezel/mini-dial";
+import { Icon } from "@/components/bezel/icons";
+import { Button, EmptyState, Label, Note, SkeletonDial, SubDial } from "@/components/bezel/kit";
+import { HistoryGrid, LastDraw, SeatList } from "@/components/bezel/circle-parts";
+import { EMPTY_DIAL, dialFromPool } from "@/components/bezel/dial-spec";
 import { parsePublicKey, useSolanaPoolActions, useSolanaPoolData } from "@/hooks/use-solana-program";
 import type { FetchedDraw, FetchedMember, FetchedPayment, FetchedPool } from "@/lib/solana/accounts";
-import { addressExplorerLink, formatAmount, shortAddress, timeUntil } from "@/lib/format";
+import { addressExplorerLink, formatAmount, timeUntil } from "@/lib/format";
 import { dismissToast, poolToasts, txErrorToast } from "@/lib/solana/transaction-toast";
 import { cn } from "@/lib/utils";
 
@@ -19,6 +24,22 @@ interface PoolData {
   payments: FetchedPayment[];
   draws: FetchedDraw[];
 }
+
+// The program lets anyone draw once the deadline has passed. Leave a minute for clock skew.
+const DRAW_GRACE_MS = 60_000;
+
+function drawError(message?: string) {
+  if (!message) return "The draw didn't go through";
+  if (/not ready/i.test(message)) return "The draw isn't ready yet. Try again in a moment.";
+  if (/unauthorized/i.test(message)) return "The draw opens after this round's deadline.";
+  if (/expired/i.test(message)) return "This draw took too long and expired. The host can run it now.";
+  return message;
+}
+
+const split = (amount: string) => {
+  const i = amount.lastIndexOf(" ");
+  return [amount.slice(0, i), amount.slice(i)] as const;
+};
 
 export default function PoolPage({ params }: { params: Promise<{ id: string }> }) {
   const { id: poolId } = use(params);
@@ -30,6 +51,8 @@ export default function PoolPage({ params }: { params: Promise<{ id: string }> }
   const [data, setData] = useState<PoolData | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [loadFailed, setLoadFailed] = useState(false);
+  const [tab, setTab] = useState<"seats" | "history">("seats");
+  const [drawing, setDrawing] = useState(false);
   const [, setTick] = useState(0);
 
   const fetchData = useCallback(async (): Promise<PoolData> => {
@@ -95,29 +118,33 @@ export default function PoolPage({ params }: { params: Promise<{ id: string }> }
 
   if (!data && loadFailed) {
     return (
-      <AppShell title="Pool" back>
-        <div className="py-16 text-center">
-          <p className="font-medium">Can&apos;t reach Solana</p>
-          <button
-            onClick={refresh}
-            disabled={refreshing}
-            className="mt-3 inline-flex h-9 items-center gap-2 rounded-lg px-3 text-sm font-medium text-primary active:bg-muted disabled:opacity-50"
-          >
-            <RefreshCw className={cn("size-4", refreshing && "animate-spin")} />
-            Try again
-          </button>
-        </div>
+      <AppShell title="Circle" back>
+        <EmptyState
+          art={<MiniDial spec={EMPTY_DIAL} className="size-[200px]" />}
+          title="Can't reach Solana"
+          action={
+            <Button tone="ghost" icon="refresh" onClick={refresh} busy={refreshing} busyLabel="Trying…">
+              Try again
+            </Button>
+          }
+        >
+          Check your connection.
+        </EmptyState>
       </AppShell>
     );
   }
 
   if (!data) {
     return (
-      <AppShell title="Pool" back>
-        <div className="space-y-3">
-          <div className="h-32 animate-pulse rounded-xl bg-muted" />
-          <div className="h-12 animate-pulse rounded-xl bg-muted" />
-          <div className="h-40 animate-pulse rounded-xl bg-muted" />
+      <AppShell title="Circle" back>
+        <div aria-busy="true" aria-label="Loading the circle">
+          <SkeletonDial size={280} />
+          <div className="mt-4 grid grid-cols-3 justify-items-center gap-2.5">
+            {[0, 1, 2].map((i) => (
+              <div key={i} className="bz-skel size-[104px] rounded-full" />
+            ))}
+          </div>
+          <div className="bz-skel mt-5 h-[52px] rounded-[26px]" />
         </div>
       </AppShell>
     );
@@ -127,13 +154,18 @@ export default function PoolPage({ params }: { params: Promise<{ id: string }> }
 
   if (!pool) {
     return (
-      <AppShell title="Pool" back>
-        <div className="py-16 text-center">
-          <p className="font-medium">Pool not found</p>
-          <Link href="/" className="mt-3 inline-block text-sm font-medium text-primary">
-            Go home
-          </Link>
-        </div>
+      <AppShell title="Circle" back>
+        <EmptyState
+          art={<MiniDial spec={EMPTY_DIAL} className="size-[200px]" />}
+          title="Circle not found"
+          action={
+            <Link href="/" className="bz-button bz-button-ghost">
+              Go home
+            </Link>
+          }
+        >
+          Check the link, or ask for the invite code again.
+        </EmptyState>
       </AppShell>
     );
   }
@@ -141,18 +173,18 @@ export default function PoolPage({ params }: { params: Promise<{ id: string }> }
   const me = publicKey?.toBase58();
   const myMember = members.find((m) => m.walletAddress === me);
   const isAuthority = me === pool.creatorId;
-  const paidThisRound = new Set(
-    payments.filter((p) => p.round === pool.currentRound).map((p) => p.walletAddress)
-  );
+  const paidThisRound = new Set(payments.filter((p) => p.round === pool.currentRound).map((p) => p.walletAddress));
   const unclaimedWin = draws.find((d) => d.winnerAddress === me && !d.claimed);
   const drawIn = timeUntil(pool.nextDrawDate);
   const pot = pool.monthlyAmount * (pool.status === "pending" ? pool.maxMembers : members.length);
   const poolKey = new PublicKey(pool.onChainAddress);
+  const dial = dialFromPool(pool, members, payments, draws, me);
 
   const run = async (
     start: () => string | number,
     tx: () => Promise<{ success: boolean; signature?: string; error?: string }>,
-    done: (signature: string) => void
+    done: (signature: string) => void,
+    explain: (message?: string) => string = (m) => m || "Transaction failed"
   ) => {
     const toastId = start();
     const result = await tx();
@@ -161,7 +193,7 @@ export default function PoolPage({ params }: { params: Promise<{ id: string }> }
       done(result.signature!);
       await load();
     } else {
-      txErrorToast(result.error || "Transaction failed");
+      txErrorToast(explain(result.error));
     }
   };
 
@@ -177,13 +209,28 @@ export default function PoolPage({ params }: { params: Promise<{ id: string }> }
       () => actions.depositStake({ poolAddress: poolKey }),
       (sig) => poolToasts.stakeDeposited(sig, myMember?.stakeAmount ?? pool.monthlyAmount, pool.currency)
     );
-  const start = () =>
-    run(poolToasts.startingPool, () => actions.startPool({ poolAddress: poolKey }), poolToasts.poolStarted);
+  const start = () => run(poolToasts.startingPool, () => actions.startPool({ poolAddress: poolKey }), poolToasts.poolStarted);
   const claim = (d: FetchedDraw) =>
     run(
       poolToasts.claimingWinnings,
       () => actions.claimWinnings({ poolAddress: poolKey, round: d.round }),
       (sig) => poolToasts.winningsClaimed(sig, d.amount, pool.currency)
+    );
+  const draw = async () => {
+    setDrawing(true);
+    await run(
+      poolToasts.drawing,
+      () => actions.executeDraw({ poolAddress: poolKey, round: pool.currentRound }),
+      (sig) => poolToasts.drawn(sig, pool.currentRound),
+      drawError
+    );
+    setDrawing(false);
+  };
+  const refund = () =>
+    run(
+      poolToasts.refunding,
+      () => actions.claimStakeRefund({ poolAddress: poolKey }),
+      (sig) => poolToasts.refunded(sig, myMember?.stakeAmount ?? 0, pool.currency)
     );
 
   const busy = actions.isLoading;
@@ -195,193 +242,187 @@ export default function PoolPage({ params }: { params: Promise<{ id: string }> }
   // total_rounds is fixed to max_members on-chain; a pool started below capacity runs
   // out of eligible winners and never completes, locking stakes (issue #13).
   const full = members.length >= pool.maxMembers;
+  // The draw takes two approvals inside a short window and pays the pot even if someone
+  // hasn't paid. Offer it only after the deadline, once every seat has paid, and only once.
+  const inGood = members.filter((m) => !m.isKicked);
+  const paidCount = inGood.filter((m) => paidThisRound.has(m.walletAddress)).length;
+  const drawDue = pool.status === "active" && Date.now() > pool.nextDrawDate.getTime() + DRAW_GRACE_MS;
+  const drawnThisRound = draws.some((d) => d.round === pool.currentRound);
+  const canDraw = drawDue && paidCount === inGood.length && !drawnThisRound;
+  const refundable = pool.status === "completed" && myMember?.stakeDeposited && (myMember.stakeAmount ?? 0) > 0;
 
   let primary: React.ReactNode = null;
+  let hint: React.ReactNode = null;
   if (!connected) {
     primary = <ConnectWalletButton />;
   } else if (unclaimedWin) {
     primary = (
-      <PrimaryButton onClick={() => claim(unclaimedWin)} disabled={busy}>
+      <Button onClick={() => claim(unclaimedWin)} busy={busy}>
         Claim {formatAmount(unclaimedWin.amount, pool.currency)}
-      </PrimaryButton>
+      </Button>
     );
   } else if (!myMember && pool.status === "pending") {
     primary = (
-      <Link
-        href="/join"
-        className="flex h-12 w-full items-center justify-center rounded-xl bg-primary text-[15px] font-semibold text-primary-foreground"
-      >
+      <Link href="/join" className="bz-button bz-button-gold">
         Join with code
       </Link>
     );
+    if (isAuthority) hint = "You made this circle. Join with its invite code to take a seat.";
   } else if (needsStake && pool.status === "pending") {
     primary = (
-      <PrimaryButton onClick={stake} disabled={busy}>
-        {busy ? "Confirm in wallet…" : "Deposit stake"}
-      </PrimaryButton>
+      <Button icon="lock" onClick={stake} busy={busy}>
+        Deposit stake
+      </Button>
     );
+    hint = "Returned at the end if you pay every round.";
   } else if (isAuthority && pool.status === "pending") {
     primary = (
-      <PrimaryButton onClick={start} disabled={busy || !full || staked < members.length}>
-        {!full
-          ? `Waiting for members (${members.length}/${pool.maxMembers})`
-          : staked < members.length
-            ? `Waiting for stakes (${staked}/${members.length})`
-            : busy
-              ? "Confirm in wallet…"
-              : "Start pool"}
-      </PrimaryButton>
+      <Button onClick={start} disabled={!full || staked < members.length} busy={busy}>
+        {!full ? `Waiting for members (${members.length}/${pool.maxMembers})` : staked < members.length ? `Waiting for stakes (${staked}/${members.length})` : "Start circle"}
+      </Button>
     );
+    hint = !full ? `${pool.maxMembers - members.length} seats still open.` : staked < members.length ? `${members.length - staked} seats still need to stake.` : "Everyone has staked.";
   } else if (myMember?.isKicked) {
-    primary = <PrimaryButton disabled>You were removed from this pool</PrimaryButton>;
+    primary = (
+      <Button disabled tone="quiet">
+        You were removed from this circle
+      </Button>
+    );
   } else if (myMember && pool.status === "active" && needsStake && myMember.inGracePeriod) {
     // Slashed for a missed round: the program requires a fresh stake before paying again
     primary = (
-      <PrimaryButton onClick={stake} disabled={busy}>
-        {busy ? "Confirm in wallet…" : "Restake to stay in"}
-      </PrimaryButton>
+      <Button icon="lock" onClick={stake} busy={busy}>
+        Restake to stay in
+      </Button>
     );
   } else if (myMember && pool.status === "active" && needsStake) {
-    primary = <PrimaryButton disabled>No stake deposited · payments are blocked</PrimaryButton>;
-  } else if (myMember && pool.status === "active") {
-    primary = paidThisRound.has(me!) ? (
-      <PrimaryButton disabled>
-        <Check className="size-4" />
-        Paid for round {pool.currentRound}
-      </PrimaryButton>
-    ) : (
-      <PrimaryButton onClick={pay} disabled={busy}>
-        {busy ? "Confirm in wallet…" : `Pay ${formatAmount(pool.monthlyAmount, pool.currency)}`}
-      </PrimaryButton>
+    primary = (
+      <Button disabled tone="quiet">
+        No stake deposited · payments are blocked
+      </Button>
     );
+  } else if (myMember && pool.status === "active" && !paidThisRound.has(me!)) {
+    primary = (
+      <Button onClick={pay} busy={busy}>
+        Pay {formatAmount(pool.monthlyAmount, pool.currency)}
+      </Button>
+    );
+  } else if (myMember && pool.status === "active" && canDraw) {
+    primary = (
+      <Button icon="draw" onClick={draw} busy={busy} busyLabel="Drawing… approve twice">
+        Draw now
+      </Button>
+    );
+    hint = "Two approvals. The chain picks from seats in good standing that haven't won.";
+  } else if (myMember && pool.status === "active") {
+    primary = (
+      <button disabled className="bz-button bz-button-done">
+        <Icon name="check" className="size-[18px]" />
+        Paid for round {pool.currentRound}
+      </button>
+    );
+    if (drawDue && !drawnThisRound) hint = `The draw opens when every seat has paid (${paidCount}/${inGood.length}).`;
+  } else if (refundable) {
+    primary = (
+      <Button icon="lock" onClick={refund} busy={busy}>
+        Get {formatAmount(myMember!.stakeAmount, pool.currency)} back
+      </Button>
+    );
+  } else if (!myMember && pool.status === "active") {
+    hint = "Started · joining is closed.";
+  } else if (pool.status === "completed") {
+    hint = "Complete.";
   }
+
+  const [potNum, potUnit] = split(formatAmount(pot, pool.currency));
+  const lastDraw = draws.length ? draws.reduce((a, b) => (b.round > a.round ? b : a)) : null;
 
   return (
     <AppShell title={pool.name} back>
-      <Panel className="mb-3">
-        <div className="flex items-center justify-between text-[13px] text-muted-foreground">
-          <span>
-            {pool.status === "active"
-              ? drawIn
-                ? `Draw in ${drawIn}`
-                : "Draw due"
-              : pool.status === "pending"
-                ? `${members.length} of ${pool.maxMembers} joined`
-                : "Completed"}
-          </span>
-          <button
-            onClick={refresh}
-            className="-m-2 flex size-9 items-center justify-center rounded-full active:bg-muted"
-            aria-label="Refresh"
-          >
-            <RefreshCw className={cn("size-4", refreshing && "animate-spin")} />
-          </button>
-        </div>
-        <p className="text-3xl font-semibold tracking-tight tabular-nums">{formatAmount(pot, pool.currency)}</p>
-        <p className="text-[13px] text-muted-foreground">
-          pot · {formatAmount(pool.monthlyAmount, pool.currency)} / round
-        </p>
-        {pool.status === "active" && <RoundBar round={pool.currentRound} total={pool.durationMonths} />}
-      </Panel>
+      <Dial spec={dial} size={280} view="top" numerals drawing={drawing} label={`${pool.name}: ${members.length} of ${pool.maxMembers} seats`} />
 
-      {primary && <div className={pool.status === "active" ? "mb-2" : "mb-5"}>{primary}</div>}
+      <div className="mt-1 flex items-center justify-center gap-2">
+        <Label>
+          {pool.status === "active"
+            ? `Round ${pool.currentRound} of ${pool.durationMonths}`
+            : pool.status === "pending"
+              ? `${members.length} of ${pool.maxMembers} joined`
+              : "Complete"}
+        </Label>
+        <button onClick={refresh} className="bz-hit flex size-7 items-center justify-center rounded-full text-muted-foreground active:bg-secondary" aria-label="Refresh">
+          <Icon name="refresh" className={cn("size-3.5", refreshing && "animate-spin")} />
+        </button>
+      </div>
 
+      <div className="mt-3 grid grid-cols-3 justify-items-center gap-2.5">
+        <SubDial label="Pot" value={potNum} unit={potUnit} />
+        {pool.status === "pending" ? (
+          <>
+            <SubDial label="Joined" value={members.length} unit={`/${pool.maxMembers}`} />
+            <SubDial label="Staked" value={stakePool ? staked : "–"} unit={stakePool ? `/${members.length}` : undefined} />
+          </>
+        ) : pool.status === "active" ? (
+          <>
+            <SubDial label="Paid" value={paidThisRound.size} unit={`/${members.length}`} />
+            <SubDial label="Draw" value={drawnThisRound ? "Done" : drawIn ?? "Ready"} tone={!drawIn && !drawnThisRound ? "ready" : undefined} />
+          </>
+        ) : (
+          <>
+            <SubDial label="Rounds" value={pool.durationMonths} unit={`/${pool.durationMonths}`} />
+            <SubDial label="Paid out" value={draws.length} unit=" pots" />
+          </>
+        )}
+      </div>
+
+      <p className="bz-help text-center">
+        {formatAmount(pool.monthlyAmount, pool.currency)} / round{stakePool ? " · stake required" : ""}
+      </p>
+
+      {primary && <div className="mt-4">{primary}</div>}
       {pool.status === "active" && (
-        <p className="mb-5 text-center text-[13px] text-muted-foreground tabular-nums">
+        <p className="mt-2 text-center text-[13px] text-muted-foreground tabular-nums">
           {paidThisRound.size}/{members.length} paid this round
         </p>
       )}
+      {hint && <p className="bz-help text-center">{hint}</p>}
 
-      {draws.length > 0 && (
-        <Section title="Winners">
-          <ul className="divide-y divide-border overflow-hidden rounded-xl border border-border bg-card">
-            {[...draws].reverse().map((d) => (
-              <li key={d.id}>
-                <a
-                  href={addressExplorerLink(d.id)}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="flex items-center gap-3 px-4 py-3 active:bg-muted"
-                >
-                  <span className="w-7 text-[13px] text-muted-foreground tabular-nums">#{d.round}</span>
-                  <div className="min-w-0 flex-1">
-                    <p className="font-mono text-sm">
-                      {d.winnerAddress === me ? "You" : shortAddress(d.winnerAddress)}
-                    </p>
-                    <p className="text-[13px] text-muted-foreground">{d.drawnAt.toLocaleDateString()}</p>
-                  </div>
-                  <span className="text-sm font-medium tabular-nums">{formatAmount(d.amount, pool.currency)}</span>
-                </a>
-              </li>
-            ))}
-          </ul>
-        </Section>
+      {myMember?.inGracePeriod && pool.status === "active" && (
+        <Note tone="signal" icon="alert" className="mt-4">
+          <b>You missed a round.</b> Restake to keep your seat
+          {myMember.graceDeadline ? ` before ${myMember.graceDeadline.toLocaleString("en-GB", { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}` : ""}.
+        </Note>
       )}
 
-      <Section title={`Members · ${members.length}/${pool.maxMembers}`}>
-        <ul className="divide-y divide-border overflow-hidden rounded-xl border border-border bg-card">
-          {members
-            .slice()
-            .sort((a, b) => (a.position ?? 0) - (b.position ?? 0))
-            .map((m) => {
-              const paid = paidThisRound.has(m.walletAddress);
-              return (
-                <li key={m.id} className="flex items-center gap-3 px-4 py-3">
-                  <span className="flex size-8 items-center justify-center rounded-full bg-muted font-mono text-[11px] font-semibold">
-                    {m.walletAddress.slice(0, 2)}
-                  </span>
-                  <div className="min-w-0 flex-1">
-                    <p className="flex items-center gap-1.5">
-                      <span className="font-mono text-sm">
-                        {m.walletAddress === me ? "You" : shortAddress(m.walletAddress)}
-                      </span>
-                      {m.walletAddress === pool.creatorId && <Crown className="size-3.5 text-amber-500" />}
-                    </p>
-                    {memberNote(m, pool) && (
-                      <p className="text-xs text-muted-foreground">{memberNote(m, pool)}</p>
-                    )}
-                  </div>
-                  {pool.status === "active" && (
-                    <span
-                      className={cn(
-                        "rounded-full px-2 py-0.5 text-[11px] font-semibold",
-                        paid ? "bg-primary/15 text-emerald-700 dark:text-primary" : "bg-muted text-muted-foreground"
-                      )}
-                    >
-                      {paid ? "Paid" : "Due"}
-                    </span>
-                  )}
-                </li>
-              );
-            })}
-          {Array.from({ length: Math.max(0, pool.maxMembers - members.length) }).map((_, i) => (
-            <li key={`open-${i}`} className="flex items-center gap-3 px-4 py-3 text-muted-foreground">
-              <span className="size-8 rounded-full border border-dashed border-border" />
-              <span className="text-sm">Open</span>
-            </li>
-          ))}
-        </ul>
-      </Section>
+      {lastDraw && <LastDraw draw={lastDraw} me={me} currency={pool.currency} />}
 
-      <div className="flex items-center justify-between px-1 text-xs text-muted-foreground">
+      <div role="tablist" aria-label="Circle details" className="bz-seg mt-5 grid-cols-2">
+        <button role="tab" aria-selected={tab === "seats"} onClick={() => setTab("seats")}>
+          <Icon name="seats" className="size-4" />
+          Seats
+        </button>
+        <button role="tab" aria-selected={tab === "history"} onClick={() => setTab("history")}>
+          <Icon name="history" className="size-4" />
+          History
+        </button>
+      </div>
+
+      <div role="tabpanel" className="mt-2">
+        {tab === "seats" ? (
+          <SeatList pool={pool} members={members} payments={payments} me={me} />
+        ) : (
+          <div className="pt-2">
+            <HistoryGrid pool={pool} members={members} payments={payments} draws={draws} me={me} />
+          </div>
+        )}
+      </div>
+
+      <div className="mt-5 flex items-center justify-between px-0.5">
         <StatusPill status={pool.status} />
-        <a
-          href={addressExplorerLink(pool.onChainAddress)}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="flex items-center gap-1 font-medium"
-        >
+        <a href={addressExplorerLink(pool.onChainAddress)} target="_blank" rel="noopener noreferrer" className="bz-link text-[13.5px]">
           Explorer
-          <ExternalLink className="size-3.5" />
+          <Icon name="external" className="size-3.5" />
         </a>
       </div>
     </AppShell>
   );
-}
-
-function memberNote(m: FetchedMember, pool: FetchedPool): string | null {
-  if (m.hasWon) return `Won round ${m.wonRound}`;
-  if (pool.status === "pending" && pool.stakeEnabled !== false && !m.stakeDeposited) return "Stake pending";
-  if (m.inDefault) return "Missed a payment";
-  return null;
 }
