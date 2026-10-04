@@ -335,20 +335,20 @@ test.describe("9. CSS is applied", () => {
     expect(styles.sheets).toBeGreaterThan(0);
     expect(styles.primary).not.toBe("");
     expect(styles.bodyBg).not.toMatch(/^rgba\(0, 0, 0, 0\)$|^rgb\(255, 255, 255\)$/);
-    // Styled font stack (Geist, see 9b), not the UA default serif
-    expect(styles.bodyFont).toMatch(/geist|sans/i);
+    // Styled font stack (Chivo, see 9b), not the UA default serif
+    expect(styles.bodyFont).toMatch(/chivo|sans/i);
     expect(styles.bodyFont.toLowerCase()).not.toMatch(/^"?times/);
     expect(styles.btnBg).not.toBe("rgba(0, 0, 0, 0)");
     expect(styles.btnBg).not.toBe("rgb(239, 239, 239)"); // UA default button grey
     expect(styles.btnRadius).toBeGreaterThanOrEqual(12);
-    expect(styles.btnHeight).toBe(48); // h-12
+    expect(styles.btnHeight).toBe(52); // Bezel main button
     expect(styles.btnDisplay).toBe("flex");
     expect(styles.navPosition).toBe("fixed");
     expect(styles.navBottom).toBe("0px");
   });
 });
 
-test("9b. Geist is the rendered sans font (E2E-2)", async ({ page }) => {
+test("9b. Chivo is the rendered sans font (E2E-2)", async ({ page }) => {
   await gotoReady(page, "/");
   const fonts = await page.evaluate(async () => {
     await document.fonts.ready;
@@ -356,12 +356,12 @@ test("9b. Geist is the rendered sans font (E2E-2)", async ({ page }) => {
     return {
       body: family(document.body),
       heading: family(document.querySelector("main h2")!),
-      loaded: [...document.fonts].some((f) => /geist/i.test(f.family) && f.status === "loaded"),
+      loaded: [...document.fonts].some((f) => /chivo/i.test(f.family) && f.status === "loaded"),
     };
   });
-  expect(fonts.body).toContain("geist");
-  expect(fonts.heading).toContain("geist");
-  expect(fonts.loaded, "a Geist font face actually loaded").toBe(true);
+  expect(fonts.body).toContain("chivo");
+  expect(fonts.heading).toContain("chivo");
+  expect(fonts.loaded, "a Chivo font face actually loaded").toBe(true);
 });
 
 test.describe("10. Safe-area shell", () => {
