@@ -16,6 +16,8 @@ import {
 
 // Screenshot capture for docs/ui-proof. Skipped in the normal gate; run with
 //   UI_PROOF=1 npx playwright test e2e/ui-proof.spec.ts
+// Pages load with ?dial=3d so the proof shows the Three.js dial even on software GL,
+// where the app itself would fall back to the SVG dial.
 // Connected screens use the watch-only mock wallet from helpers and a mocked RPC
 // serving Borsh-encoded Pool / Member / Payment / Draw accounts.
 
@@ -226,8 +228,10 @@ async function setTheme(page: Page, theme: "dark" | "light") {
   await page.addInitScript((t) => localStorage.setItem("theme", t), theme);
 }
 
-const shot = (page: Page, theme: string, name: string) =>
-  page.screenshot({ path: path.join(OUT, `${theme}-${name}.png`) });
+const shot = async (page: Page, theme: string, name: string) => {
+  await page.waitForTimeout(2500); // let the dial compile and draw its first frame
+  await page.screenshot({ path: path.join(OUT, `${theme}-${name}.png`) });
+};
 
 for (const theme of ["dark", "light"] as const) {
   test.describe(`ui-proof ${theme} walkthrough`, () => {
@@ -235,7 +239,7 @@ for (const theme of ["dark", "light"] as const) {
 
     test("first-visit walkthrough", async ({ page }) => {
       await setTheme(page, theme);
-      await page.goto("/");
+      await page.goto("/?dial=3d");
       const walkthrough = page.getByTestId("walkthrough");
       for (const [i, title] of ["Together", "Pay in", "Jackpot", "Your wallet"].entries()) {
         await expect(walkthrough.getByRole("heading", { name: title })).toBeVisible();
@@ -252,11 +256,11 @@ for (const theme of ["dark", "light"] as const) {
   test.describe(`ui-proof ${theme}`, () => {
     test("disconnected screens", async ({ page }) => {
       await setTheme(page, theme);
-      await gotoReady(page, "/");
+      await gotoReady(page, "/?dial=3d");
       await expect(page.getByRole("button", { name: "Connect wallet" })).toBeVisible();
       await shot(page, theme, "01-welcome");
 
-      await gotoReady(page, "/pools/create");
+      await gotoReady(page, "/pools/create?dial=3d");
       await page.getByPlaceholder("Family circle").fill("Family circle");
       await page.getByPlaceholder("0.5").fill("0.5");
       await shot(page, theme, "04-create");
@@ -275,14 +279,14 @@ for (const theme of ["dark", "light"] as const) {
       await mockRpc(page, accounts);
       await installMockWallet(page);
 
-      await gotoReady(page, "/");
+      await gotoReady(page, "/?dial=3d");
       await connectMockWallet(page);
       await expect(page.getByText("Family circle").first()).toBeVisible({ timeout: 15_000 });
       await expect(walletSheet(page)).toHaveCount(0);
       await shot(page, theme, "02-home");
 
       const family = accounts.find((a) => a.kind === "Pool")!.pubkey.toBase58();
-      await gotoReady(page, `/pools/${family}`);
+      await gotoReady(page, `/pools/${family}?dial=3d`);
       await expect(page.getByRole("button", { name: /^Pay / })).toBeVisible({ timeout: 15_000 });
       await shot(page, theme, "03-pool");
       await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));

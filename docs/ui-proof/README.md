@@ -1,17 +1,18 @@
-# UI proof — mobile shell
+# UI proof — Bezel
 
 390×844 @2x, `next build && next start`, `dark-*` and `light-*` for each screen.
 
 | # | Screen |
 |---|--------|
-| 00-1…4 | First-visit walkthrough: circle, pay in, pot, keys |
-| 01 | Welcome (disconnected) |
-| 02 | Home: next draw + pools |
-| 03 / 03b | Active pool: pay, winners, members paid/due |
-| 04 | Create |
-| 05 | Join: code lookup |
+| 00-1…4 | First-visit walkthrough (unchanged): Together, Pay in, Jackpot, Your wallet |
+| 01 | Welcome (signed out): the dial, Connect wallet, Join with code |
+| 02 | Home: next-draw dial and your circles |
+| 03 / 03b | Circle: dial with seat numbers, pot / paid / draw, Pay, last result, Seats tab |
+| 04 | New circle: the dial previews the seats, ruler, stake |
+| 05 | Join: eight-box code, circle found |
 
-`asset-montage.png`: the generated brand art in `public/assets/generated/`.
+The dial is Three.js. Pages load with `?dial=3d` so the proof shows it on any machine; without
+the flag, software WebGL (CI) falls back to the SVG dial, which is the same design drawn flat.
 
 Regenerate:
 
