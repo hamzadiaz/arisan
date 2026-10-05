@@ -273,6 +273,15 @@ test.describe("Draw, missed payments and refunds", () => {
     expect(programs.filter((id) => id === "AddressLookupTab1e1111111111111111111111111")).toHaveLength(2);
   });
 
+  // Twenty rounds don't fit a phone: the history scrolls inside its card, never the page
+  test("a twenty-round history scrolls in its card, not the page", async ({ page }) => {
+    const seats = [staked(me), ...Array.from({ length: 19 }, (_, i) => staked(new PublicKey(Buffer.alloc(32, i + 1))))];
+    await openPool(page, { ...due(seats, []), currentRound: 11, nextDrawIn: 600 });
+    await main(page).getByRole("tab", { name: "History" }).click();
+    await expect(main(page).getByRole("region", { name: /Payment history/ })).toBeVisible();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(await page.evaluate(() => document.documentElement.clientWidth));
+  });
+
   test("a half-done draw is finished with one approval, without a new commit", async ({ page }) => {
     await openPool(page, due([staked(me), staked(other)], [me, other], { committedSlot: 900, slot: 1000 }));
     await expect(main(page).getByText("Last step.", { exact: false })).toBeVisible();

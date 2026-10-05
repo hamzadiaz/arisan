@@ -92,7 +92,7 @@ export function HistoryGrid({ pool, members, payments, draws, me }: { pool: Fetc
     return "next";
   };
   return (
-    <div className="overflow-x-auto rounded-[14px]" tabIndex={0} role="region" aria-label="Payment history, scrolls sideways">
+    <div className="relative overflow-x-auto rounded-[14px]" tabIndex={0} role="region" aria-label="Payment history, scrolls sideways">
       <div
         role="table"
         aria-label="Payments by round"
