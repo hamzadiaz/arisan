@@ -156,6 +156,8 @@ test("a two-seat circle runs end to end through the UI on a real chain", async (
   // Host starts; both pay round 1
   await A.reload();
   await tap(A, "Start circle", 60_000);
+  // Let the start land before reloading anything: a reload can abort the send
+  await expect(A.getByText("Circle started")).toBeVisible({ timeout: 60_000 });
   for (const page of [A, B]) {
     await page.reload();
     await tap(page, "Pay 0.01 SOL", 60_000);
