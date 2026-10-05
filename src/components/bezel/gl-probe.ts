@@ -1,0 +1,5 @@
+// Runs in <head> before first paint and marks <html data-gl="3d|flat">. On "3d" the dial keeps
+// its flat SVG hidden until the 3D dial draws, so the two never swap in front of you.
+// 3D only on a real GPU: software WebGL (CI's SwiftShader, emulators, blocklisted phones) and
+// Save-Data get the SVG dial. `?dial=3d` forces the 3D path for a smoke test, `?dial=svg` the SVG.
+export const GL_PROBE = `(function(){var f="flat";try{var q=new URLSearchParams(location.search).get("dial"),n=navigator;if(q==="3d")f="3d";else if(q!=="svg"&&!(n.connection&&n.connection.saveData)){var g=document.createElement("canvas").getContext("webgl2",{failIfMajorPerformanceCaveat:true});if(g){var i=g.getExtension("WEBGL_debug_renderer_info"),r=String(g.getParameter(i?i.UNMASKED_RENDERER_WEBGL:g.RENDERER));if(!/swiftshader|llvmpipe|softpipe|lavapipe|software|basic render/i.test(r))f="3d";var l=g.getExtension("WEBGL_lose_context");l&&l.loseContext()}}}catch(e){}document.documentElement.setAttribute("data-gl",f)})();`;

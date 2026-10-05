@@ -239,6 +239,8 @@ for (const theme of ["dark", "light"] as const) {
     test.use({ storageState: { cookies: [], origins: [] } });
 
     test("first-visit walkthrough", async ({ page }) => {
+      // Four beats on the 3D dial, which compiles slowly on software GL
+      test.setTimeout(120_000);
       await setTheme(page, theme);
       await page.goto("/?dial=3d");
       const walkthrough = page.getByTestId("walkthrough");

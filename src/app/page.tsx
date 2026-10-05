@@ -9,8 +9,8 @@ import { ConnectWalletButton } from "@/components/mobile/wallet-button";
 import { Dial } from "@/components/bezel/dial";
 import { MiniDial } from "@/components/bezel/mini-dial";
 import { Icon } from "@/components/bezel/icons";
-import { Button, EmptyState, Label, LowFunds, SkeletonDial, Status } from "@/components/bezel/kit";
-import { EMPTY_DIAL, dialFromPool, dialFromPoolOnly, type DialSpec } from "@/components/bezel/dial-spec";
+import { Button, EmptyState, Label, LowFunds, Status } from "@/components/bezel/kit";
+import { dialFromPool, dialFromPoolOnly, type DialSpec } from "@/components/bezel/dial-spec";
 import { useSolanaPoolActions, useSolanaPoolData } from "@/hooks/use-solana-program";
 import { useBalance } from "@/hooks/use-balance";
 import type { FetchedMember, FetchedPayment, FetchedPool } from "@/lib/solana/accounts";
@@ -21,6 +21,9 @@ import { dismissToast, poolToasts, txErrorToast } from "@/lib/solana/transaction
 
 // Signed out: the dial waits with its seats open.
 const WELCOME_DIAL: DialSpec = { seats: 6, mode: "pending", staked: [0, 1, 2, 3, 4, 5], you: -1 };
+// Signed in, while loading or with nothing yet: the same coin, its seats open. Home's coin
+// never leaves the glass, so connecting doesn't swap the dial for something else.
+const OPEN_DIAL: DialSpec = { seats: 6, mode: "pending", open: [0, 1, 2, 3, 4, 5] };
 
 export default function HomePage() {
   const { connected } = useWallet();
@@ -99,7 +102,7 @@ function MyCircles() {
   if (pools === null && loadFailed) {
     return (
       <EmptyState
-        art={<Dial spec={EMPTY_DIAL} size={220} />}
+        art={<Dial spec={OPEN_DIAL} size={270} />}
         title="Can’t reach Solana"
         action={
           <button
@@ -123,7 +126,7 @@ function MyCircles() {
     return (
       <div role="status" aria-busy="true">
         <span className="sr-only">Loading your circles</span>
-        <SkeletonDial size={270} />
+        <Dial spec={OPEN_DIAL} size={270} />
         <div className="mt-4 flex flex-col items-center gap-2.5">
           <div className="bz-skel h-2.5 w-40 rounded-full" />
           <div className="bz-skel h-6 w-52 rounded-lg" />
@@ -138,7 +141,7 @@ function MyCircles() {
   if (pools.length === 0) {
     return (
       <EmptyState
-        art={<Dial spec={EMPTY_DIAL} size={220} />}
+        art={<Dial spec={OPEN_DIAL} size={270} />}
         title="No circles yet"
         action={
           <>
@@ -258,12 +261,8 @@ function NextCircle({ pool: listed }: { pool: FetchedPool }) {
 
   return (
     <div className="flex flex-col items-center text-center">
-      {/* Mount the dial once its seats are known: a later "new winner" would replay the draw. */}
-      {detail === undefined ? (
-        <SkeletonDial size={270} />
-      ) : (
-        <Dial spec={dial} size={270} label={`${pool.name}, round ${pool.currentRound} of ${pool.durationMonths}`} />
-      )}
+      {/* The first full read cuts to its seats: a past winner arriving with it mustn't replay the draw. */}
+      <Dial spec={dial} scene={detail ? "read" : "listed"} size={270} label={`${pool.name}, round ${pool.currentRound} of ${pool.durationMonths}`} />
       <Label className="mt-1.5 flex max-w-full items-center gap-1.5">
         <span className="truncate">{pool.name}</span>
         <span className="shrink-0">· Round {pool.currentRound}/{pool.durationMonths}</span>

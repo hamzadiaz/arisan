@@ -1,8 +1,8 @@
 import { test, expect, type Page } from "@playwright/test";
 import { expectNoForbiddenCopy, gotoReady } from "./helpers";
 
-// First visit shows a four-screen walkthrough over Home. Skip or finish stores
-// arisan.walkthrough.v1 and it never shows again.
+// First visit shows a four-screen walkthrough over Home, told on the app's own dial. Skip or
+// finish stores arisan.walkthrough.v1 and it never shows again.
 
 test.use({ storageState: { cookies: [], origins: [] } });
 
@@ -51,74 +51,86 @@ test("the last screen is about your wallet, never keys", async ({ page }) => {
   await gotoReady(page, "/");
   for (let i = 0; i < 3; i++) await walkthrough(page).getByRole("button", { name: "Next" }).click();
   await expect(walkthrough(page).getByRole("heading", { name: "Your wallet" })).toBeVisible();
-  await expect(walkthrough(page).getByText("You approve.")).toBeVisible();
+  await expect(walkthrough(page).getByText("Nothing moves until you approve.")).toBeVisible();
   await expect(walkthrough(page)).not.toContainText(/keys/i);
 });
 
-const scene = (page: Page) => walkthrough(page).getByTestId("walkthrough-scene");
-const snapshot = (page: Page) =>
-  scene(page).evaluate((c: HTMLCanvasElement) => ({ frame: c.dataset.frame, pixels: c.toDataURL() }));
-
-/** Count of lit (non-transparent) pixels in the middle of the scene. */
-const litPixels = (page: Page) =>
-  scene(page).evaluate((c: HTMLCanvasElement) => {
-    const ctx = c.getContext("2d")!;
-    const { data } = ctx.getImageData(c.width / 4, c.height / 5, c.width / 2, c.height / 2);
-    let lit = 0;
-    for (let i = 3; i < data.length; i += 4) if (data[i] > 40) lit++;
-    return lit;
-  });
-
-test("the scene is a full-screen canvas that is already moving within a second", async ({ page }) => {
+test("keys move through it: arrows step, Escape skips, Tab stays inside", async ({ page }) => {
   await gotoReady(page, "/");
-  const canvas = scene(page);
-  await expect(canvas).toHaveAttribute("data-playing", "true");
-
-  const box = (await canvas.boundingBox())!;
-  const viewport = page.viewportSize()!;
-  expect(box.width).toBeGreaterThanOrEqual(viewport.width);
-  expect(box.height).toBeGreaterThanOrEqual(viewport.height);
-  expect(await litPixels(page)).toBeGreaterThan(1000);
-
-  // The loop is running: the heartbeat ticks and the drawn pixels change.
-  const a = await snapshot(page);
-  await expect.poll(async () => (await snapshot(page)).frame, { timeout: 1_000 }).not.toBe(a.frame);
-  await page.waitForTimeout(300);
-  expect((await snapshot(page)).pixels).not.toBe(a.pixels);
+  await expect(walkthrough(page)).toBeFocused();
+  await page.keyboard.press("ArrowRight");
+  await expect(walkthrough(page).getByRole("heading", { name: TITLES[1] })).toBeVisible();
+  await page.keyboard.press("ArrowLeft");
+  await expect(walkthrough(page).getByRole("heading", { name: TITLES[0] })).toBeVisible();
+  await page.keyboard.press("Tab");
+  await expect(walkthrough(page).getByRole("button", { name: "Skip" })).toBeFocused();
+  await page.keyboard.press("Tab");
+  await expect(walkthrough(page).getByRole("button", { name: "Next" })).toBeFocused();
+  await page.keyboard.press("Tab");
+  await expect(walkthrough(page).getByRole("button", { name: "Skip" })).toBeFocused();
+  await page.keyboard.press("Shift+Tab");
+  await expect(walkthrough(page).getByRole("button", { name: "Next" })).toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect(walkthrough(page)).toBeHidden();
+  expect(await stored(page)).not.toBeNull();
 });
 
-test("each beat tells its part of the story on the same canvas", async ({ page }) => {
+const scene = (page: Page) => walkthrough(page).getByTestId("walkthrough-scene");
+const LAST_STEP = ["6", "6", "1", "1"];
+
+test("each beat plays on the app's own dial, never remounted between beats", async ({ page }) => {
   await gotoReady(page, "/");
-  const canvas = scene(page);
-  const handle = await canvas.elementHandle();
+  const dial = scene(page).locator("[data-dial]");
+  await expect(dial).toHaveCount(1);
+  const handle = await dial.elementHandle();
   for (let beat = 0; beat < 4; beat++) {
-    await expect(canvas).toHaveAttribute("data-beat", String(beat));
-    const a = await snapshot(page);
-    await page.waitForTimeout(250);
-    expect((await snapshot(page)).pixels).not.toBe(a.pixels);
+    await expect(scene(page)).toHaveAttribute("data-beat", String(beat));
+    // Software WebGL (CI) keeps the flat dial, which shows where each beat ends
+    if ((await dial.getAttribute("data-dial")) === "svg") await expect(scene(page)).toHaveAttribute("data-step", LAST_STEP[beat]);
     if (beat < 3) await walkthrough(page).getByRole("button", { name: "Next" }).click();
   }
-  // One canvas for the whole intro, never remounted between beats.
-  expect(await handle!.evaluate((c) => c.isConnected)).toBe(true);
+  expect(await handle!.evaluate((d) => d.isConnected)).toBe(true);
+});
+
+test("the 3D dial plays each beat, then hands the landing dial a warm engine", async ({ page }) => {
+  test.setTimeout(90_000);
+  await gotoReady(page, "/?dial=3d");
+  const dial = scene(page).locator("[data-dial]");
+  await expect(dial).toHaveAttribute("data-dial", "webgl", { timeout: 60_000 });
+  // The beat plays step by step once the dial draws
+  await expect(scene(page)).toHaveAttribute("data-step", "6", { timeout: 10_000 });
+  for (let i = 0; i < 3; i++) await walkthrough(page).getByRole("button", { name: "Next" }).click();
+  await expect(scene(page)).toHaveAttribute("data-beat", "3");
+
+  // Under the intro the landing dial waits, its flat SVG hidden: the two never swap in view
+  const landing = page.locator("main [data-dial]");
+  await expect(landing).toHaveAttribute("data-dial", "auto");
+  expect(await landing.locator(".dial-poster").evaluate((p) => getComputedStyle(p).opacity)).toBe("0");
+  await landing.evaluate((d) => {
+    const seen: string[] = [];
+    (window as unknown as { dialModes: string[] }).dialModes = seen;
+    new MutationObserver(() => seen.push(d.getAttribute("data-dial") ?? "")).observe(d, { attributes: true, attributeFilter: ["data-dial"] });
+  });
+  await walkthrough(page).getByRole("button", { name: "Get started" }).click();
+  // It draws in 3D straight away, while the intro is still fading out
+  await expect(landing).toHaveAttribute("data-dial", "webgl", { timeout: 1_000 });
+  await expect(landing).toHaveAttribute("data-instant", "");
+  await expect(landing.locator("canvas")).toHaveCount(1);
+  await expect(walkthrough(page)).toBeHidden();
+  expect(await page.evaluate(() => (window as unknown as { dialModes: string[] }).dialModes)).toEqual(["webgl"]);
 });
 
 test.describe("reduced motion", () => {
   test.use({ reducedMotion: "reduce" });
 
-  test("draws a still scene and never loops", async ({ page }) => {
+  test("each beat shows where it ends and stays still", async ({ page }) => {
     await gotoReady(page, "/");
-    const canvas = scene(page);
-    await expect(canvas).toHaveAttribute("data-playing", "false");
-    await expect(canvas).toHaveAttribute("data-frame", "still");
-    expect(await litPixels(page)).toBeGreaterThan(1000);
-
-    const a = await snapshot(page);
-    await page.waitForTimeout(500);
-    expect((await snapshot(page)).pixels).toBe(a.pixels);
-
-    // Moving on redraws the next beat's settled pose, still without looping.
-    await walkthrough(page).getByRole("button", { name: "Next" }).click();
-    await expect(canvas).toHaveAttribute("data-beat", "1");
-    await expect(canvas).toHaveAttribute("data-playing", "false");
+    for (let beat = 0; beat < 2; beat++) {
+      await expect(scene(page)).toHaveAttribute("data-beat", String(beat));
+      await expect(scene(page)).toHaveAttribute("data-step", LAST_STEP[beat]);
+      await page.waitForTimeout(600);
+      await expect(scene(page)).toHaveAttribute("data-step", LAST_STEP[beat]);
+      await walkthrough(page).getByRole("button", { name: "Next" }).click();
+    }
   });
 });

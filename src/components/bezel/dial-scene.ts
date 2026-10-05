@@ -89,8 +89,8 @@ type Tween = { t0: number; dur: number; fn: (k: number) => void; resolve: () => 
 export interface DialOwner {
   /** The WebGL context was lost; the SVG dial should show. */
   onLost?: () => void;
-  /** Another Dial took the shared canvas. */
-  onEvict?: () => void;
+  /** Another Dial took the shared canvas; `still` is its last frame, to show while it leaves. */
+  onEvict?: (still: HTMLCanvasElement | null) => void;
 }
 type MarkGroup = Group & { userData: { dome?: Mesh } };
 
@@ -480,9 +480,14 @@ class DialEngine {
     return this.lost;
   }
 
+  /** Shaders compiled and the context alive: a new host draws in the same frame. */
+  get isReady() {
+    return this.ready && !this.lost;
+  }
+
   // ---------- hosting
   attach(host: HTMLElement, spec: DialSpec, opts: AttachOptions, owner: DialOwner = {}) {
-    if (this.owner && this.host !== host) this.owner.onEvict?.();
+    if (this.owner && this.host !== host) this.owner.onEvict?.(this.still());
     this.reset();
     this.owner = owner;
     this.host = host;
@@ -509,25 +514,52 @@ class DialEngine {
   /** Compile shaders off the critical path, then draw the first frame. */
   async warm() {
     if (!this.ready) {
-      // One hidden mesh per mark material, so a first win or payment doesn't compile mid-animation
-      const warmers = new Group();
-      for (const mat of Object.values(this.mats)) {
-        if (mat instanceof SpriteMaterial) warmers.add(new Sprite(mat));
-        else warmers.add(new Mesh(this.geo.dome, mat));
-      }
-      warmers.scale.setScalar(1e-4);
-      this.scene.add(warmers);
-      this.compiling = this.renderer.compileAsync(this.scene, this.camera).then(
-        () => undefined,
-        () => undefined // compileAsync is an optimisation only
-      );
+      // A second Dial attaching mid-compile waits for the same compile
+      this.compiling ??= this.compile();
       await this.compiling;
-      this.compiling = null;
-      this.scene.remove(warmers);
       if (this.lost) return;
-      this.ready = true;
     }
     this.render();
+  }
+
+  private async compile() {
+    // One hidden mesh per mark material, so a first win or payment doesn't compile mid-animation
+    const warmers = new Group();
+    for (const mat of Object.values(this.mats)) {
+      if (mat instanceof SpriteMaterial) warmers.add(new Sprite(mat));
+      else warmers.add(new Mesh(this.geo.dome, mat));
+    }
+    warmers.scale.setScalar(1e-4);
+    this.scene.add(warmers);
+    // An optimisation only: a failed compile (even a synchronous throw) still settles
+    await Promise.resolve()
+      .then(() => this.renderer.compileAsync(this.scene, this.camera))
+      .catch(() => undefined);
+    this.scene.remove(warmers);
+    this.compiling = null;
+    if (!this.lost) this.ready = true;
+  }
+
+  /** Jump to a state at once, cutting any animation in flight (the intro's beats). */
+  show(spec: DialSpec) {
+    this.reset();
+    if (spec.seats !== this.spec.seats) this.dial.rotation.y = 0;
+    this.coinPivot.rotation.set(0, 0, 0);
+    this.coinPivot.position.y = 0;
+    this.spec = spec;
+    this.build();
+  }
+
+  /** The current frame as a plain canvas, for the Dial that is giving up the shared one. */
+  private still() {
+    if (!this.host || !this.ready || this.lost || !this.canvas.width) return null;
+    const c = canvas2d(this.canvas.width, this.canvas.height);
+    c.className = this.canvas.className;
+    c.setAttribute("aria-hidden", "true");
+    // Read back in the same task as the render: the drawing buffer isn't preserved after that
+    this.renderer.render(this.scene, this.camera);
+    c.getContext("2d")?.drawImage(this.canvas, 0, 0);
+    return c;
   }
 
   /** Follow a theme change in place, without handing the canvas back. */
@@ -726,7 +758,8 @@ class DialEngine {
     return -Math.PI / 2 + (i * TAU) / n;
   }
 
-  private build(grow = false) {
+  /** `grow`: every mark scales in (a new seat count), or just the listed seats (someone joined). */
+  private build(grow: boolean | number[] = false) {
     this.dial.traverse((o) => {
       const mesh = o as Mesh;
       if (mesh.userData?.own) {
@@ -765,7 +798,8 @@ class DialEngine {
         }
       }
       if (i === s.you) g.add(new Mesh(this.geo.you, this.mats.you));
-      if (grow && !this.opts.reducedMotion) g.scale.setScalar(0.01);
+      const grows = grow === true || (Array.isArray(grow) && grow.includes(i));
+      if (grows && !this.opts.reducedMotion) g.scale.setScalar(0.01);
       this.dial.add(g);
       this.marks.push(g);
     }
@@ -786,7 +820,9 @@ class DialEngine {
     }
     this.coinPivot.visible = s.coin !== false;
     this.backMesh.material = s.coin === false ? this.caseEmpty : this.themed.back;
-    if (grow) this.marks.forEach((m, i) => void this.tween(0.18 + i * 0.012, (k) => m.scale.setScalar(Math.max(0.01, ease.outBack(k)))));
+    if (grow === true) this.marks.forEach((m, i) => void this.tween(0.18 + i * 0.012, (k) => m.scale.setScalar(Math.max(0.01, ease.outBack(k)))));
+    else if (grow)
+      for (const m of grow.map((i) => this.marks[i]).filter(Boolean)) void this.tween(0.34, (k) => m.scale.setScalar(Math.max(0.01, ease.outBack(k))));
     this.render();
   }
 
@@ -811,9 +847,13 @@ class DialEngine {
       await this.flip();
       return;
     }
-    const newlyLit = Array.from({ length: next.seats }, (_, i) => i).filter((i) => markState(next, i) === "lit" && markState(prev, i) !== "lit");
+    const seats = Array.from({ length: next.seats }, (_, i) => i);
+    const newlyLit = seats.filter((i) => markState(next, i) === "lit" && markState(prev, i) !== "lit");
+    // Someone took an open seat: its mark pops into place and a faint ring leaves it
+    const joined = seats.filter((i) => markState(prev, i) === "open" && markState(next, i) !== "open");
     this.spec = next;
-    this.build();
+    this.build(joined);
+    for (const i of joined) void this.ripple(i);
     for (const i of newlyLit) {
       if (gen !== this.gen) return;
       await this.detent(i);
@@ -825,6 +865,20 @@ class DialEngine {
     if (this.spinning) return Promise.resolve();
     const base = this.dial.rotation.y;
     return this.tween(0.22, (k) => (this.dial.rotation.y = base + amount * Math.sin(k * Math.PI)));
+  }
+
+  private async ripple(i: number) {
+    const g = this.marks[i];
+    if (!g) return;
+    const ring = new Mesh(this.geo.ripple, new MeshBasicMaterial({ color: (this.mats.taken as MeshBasicMaterial).color.clone(), transparent: true, toneMapped: false }));
+    g.add(ring);
+    await this.tween(0.6, (k) => {
+      ring.scale.setScalar(1 + 3.2 * ease.out3(k));
+      (ring.material as MeshBasicMaterial).opacity = 0.7 * (1 - k);
+    });
+    g.remove(ring);
+    (ring.material as Material).dispose();
+    this.render();
   }
 
   // C1: the mark flashes, settles to lume, a ripple leaves it, the bezel ticks one notch
@@ -885,6 +939,11 @@ let engine: DialEngine | null = null;
 export function getDialEngine() {
   if (!engine || engine.isLost) engine = new DialEngine();
   return engine;
+}
+
+/** The engine if it can draw right now, so a new Dial shows in 3D from its first frame. */
+export function readyDialEngine() {
+  return engine?.isReady ? engine : null;
 }
 
 export type { DialEngine };

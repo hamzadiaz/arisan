@@ -6,6 +6,7 @@ import { MobileWalletRegistration } from "@/components/providers/mobile-wallet-r
 import { Toaster } from "@/components/ui/sonner";
 import { Walkthrough } from "@/components/onboarding/walkthrough";
 import { BezelDefs } from "@/components/bezel/seal";
+import { GL_PROBE } from "@/components/bezel/gl-probe";
 import "./globals.css";
 
 // Bezel type: Chivo for the interface, Chivo Mono for figures and addresses,
@@ -70,6 +71,10 @@ export default function RootLayout({
       suppressHydrationWarning
       className={`${chivo.variable} ${chivoMono.variable} ${michroma.variable}`}
     >
+      <head>
+        {/* Before first paint: does this device draw the 3D dial? */}
+        <script dangerouslySetInnerHTML={{ __html: GL_PROBE }} />
+      </head>
       <body className="font-sans antialiased">
         <BezelDefs />
         <ThemeProvider

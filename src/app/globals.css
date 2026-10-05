@@ -782,13 +782,31 @@
     pointer-events: none;
   }
 
-  [data-dial] > canvas {
-    opacity: 0;
-    transition: opacity 0.25s ease-out;
+  /* The flat SVG is the fallback. Where 3D will draw it stays hidden: the two never swap in view */
+  .dial-poster {
+    transition: opacity 0.3s ease-out;
   }
 
-  [data-dial="webgl"] > canvas {
+  [data-dial="webgl"] > .dial-poster,
+  [data-dial="still"] > .dial-poster,
+  :root[data-gl="3d"] [data-dial="auto"] > .dial-poster {
+    opacity: 0;
+  }
+
+  /* The 3D dial fades in the first time; after that the warm engine shows it at once */
+  [data-dial] > canvas {
+    opacity: 0;
+    transition: opacity 0.4s ease-out;
+  }
+
+  [data-dial="webgl"] > canvas,
+  [data-dial="still"] > canvas {
     opacity: 1;
+  }
+
+  [data-dial][data-instant] > canvas,
+  [data-dial="still"] > canvas {
+    transition: none;
   }
 
   .dial-numeral {
@@ -1059,6 +1077,45 @@
   }
 }
 
+@layer components {
+  /* First-visit intro: the dial on a dark table, lit from above, emerald under the glass */
+  .bz-intro {
+    background:
+      radial-gradient(70% 42% at 50% 38%, rgba(18, 160, 142, 0.2), transparent 72%),
+      radial-gradient(90% 46% at 50% -6%, rgba(212, 175, 55, 0.12), transparent 70%),
+      linear-gradient(180deg, #0e0d09 0%, #0a0f0d 46%, #06120e 100%);
+  }
+
+  .bz-intro-title {
+    font-size: 34px;
+    line-height: 1.1;
+    font-weight: 600;
+    letter-spacing: -0.025em;
+    color: var(--gold-hi);
+    background: linear-gradient(180deg, #fbefc4 10%, #e2bf5c 62%, #c99a3e 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+
+  .bz-intro-step {
+    width: 16px;
+    height: 3px;
+    border-radius: 2px;
+    background: var(--line-2);
+    transition: width 0.3s ease, background-color 0.3s ease;
+  }
+
+  .bz-intro-step.is-done {
+    background: var(--gold);
+  }
+
+  .bz-intro-step.is-now {
+    width: 28px;
+    background: var(--glow);
+  }
+}
+
 @keyframes bz-fade {
   from {
     opacity: 0;
@@ -1103,6 +1160,10 @@
   .bz-sheet,
   .bz-sheet-overlay {
     animation: none;
+  }
+
+  .bz-intro-step {
+    transition: none;
   }
 }
 
