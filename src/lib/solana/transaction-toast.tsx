@@ -100,16 +100,23 @@ export const poolToasts = {
   startingPool: () => confirming("Start circle"),
   poolStarted: (signature: string) => done("Circle started", signature, "Round 1 is open"),
 
-  drawing: () => confirming("Run the draw · approve twice"),
+  drawing: () => confirming("Start the draw"),
+  drawStarted: (signature: string) => done("Draw started", signature, "Now finish it: one more approval", 8000),
   finishing: () => confirming("Finish the draw"),
   drawn: (signature: string, round: number) => done(`Round ${round} drawn`, signature, undefined, 6000),
 
   marking: () => confirming("Mark missed payments"),
-  marked: (signature: string, count: number) =>
-    done(count === 1 ? "Missed payment marked" : `${count} missed payments marked`, signature),
+  marked: (signature: string, count: number, removed: number) =>
+    done(
+      removed === count
+        ? count === 1 ? "Seat removed" : `${count} seats removed`
+        : count === 1 ? "Missed payment marked" : `${count} missed payments marked`,
+      signature
+    ),
 
   leaving: () => confirming("Leave circle"),
-  left: (signature: string) => done("You left the circle", signature, "Your stake is back in your wallet"),
+  left: (signature: string, staked: boolean) =>
+    done("You left the circle", signature, staked ? "Your stake is back in your wallet" : undefined),
 
   rejoining: () => confirming("Rejoin circle"),
   rejoined: (signature: string) => done("You’re back in", signature),

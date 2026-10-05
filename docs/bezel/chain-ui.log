@@ -1,0 +1,5 @@
+Running 1 test using 1 worker
+[1/1] [mobile-390] › e2e\chain.spec.ts:115:5 › a two-seat circle runs end to end through the UI on a real chain
+  Slow test file: [mobile-390] › e2e\chain.spec.ts (13.1m)
+  Consider running tests from slow files in parallel. See: https://playwright.dev/docs/test-parallel
+  1 passed (13.2m)

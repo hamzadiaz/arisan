@@ -32,6 +32,15 @@ function supports3D() {
 }
 
 const walkthroughOpen = () => !!document.querySelector('[data-testid="walkthrough"]');
+// A device that keeps losing its GL context gets the SVG for the rest of the session
+let lostContexts = 0;
+const MAX_LOST_CONTEXTS = 3;
+/** Count a lost context; false once the device has lost too many to keep trying 3D. */
+function retryAfterLoss() {
+  lostContexts += 1;
+  if (lostContexts >= MAX_LOST_CONTEXTS) support = false;
+  return support !== false;
+}
 // three loads only when a dial is on screen
 const loadScene = () => import("./dial-scene");
 
@@ -62,6 +71,7 @@ export function Dial({ spec, size = 280, view = "hero", numerals = false, drawin
   const [labels, setLabels] = useState<{ x: number; y: number }[] | null>(null);
   const [theme, setTheme] = useState<"dark" | "light" | null>(null);
   const [attempt, setAttempt] = useState(0);
+  const [still, setStill] = useState(false);
   const key = JSON.stringify(spec);
   const hasTheme = theme !== null;
 
@@ -72,6 +82,7 @@ export function Dial({ spec, size = 280, view = "hero", numerals = false, drawin
 
   // Follow what's on screen, not next-themes state (undefined before mount).
   useEffect(() => {
+    setStill(window.matchMedia("(prefers-reduced-motion: reduce)").matches);
     const read = () => setTheme(document.documentElement.classList.contains("dark") ? "dark" : "light");
     read();
     const mo = new MutationObserver(read);
@@ -92,7 +103,7 @@ export function Dial({ spec, size = 280, view = "hero", numerals = false, drawin
       if (!alive) return;
       engine.current = null;
       setMode("svg");
-      if (again) {
+      if (again && retryAfterLoss()) {
         retry = setTimeout(() => {
           if (!alive) return;
           if (document.hidden) document.addEventListener("visibilitychange", () => alive && setAttempt((n) => n + 1), { once: true });
@@ -188,8 +199,9 @@ export function Dial({ spec, size = 280, view = "hero", numerals = false, drawin
   }, [drawing, mode]);
 
   const flat = numerals && mode === "svg" ? flatLabels(spec.seats) : null;
-  // The numbers can't follow a free spin; hide them until the bezel settles.
-  const shown = mode === "webgl" ? (drawing ? null : labels) : flat;
+  // The numbers can't follow a free spin; hide them until the bezel settles (it doesn't spin
+  // at all with reduced motion).
+  const shown = mode === "webgl" ? (drawing && !still ? null : labels) : flat;
 
   return (
     <div

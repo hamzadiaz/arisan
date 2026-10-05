@@ -20,6 +20,7 @@ export function WalletChip() {
     return (
       <button
         onClick={() => setVisible(true)}
+        data-connect=""
         className="bz-hit inline-flex h-8 shrink-0 items-center rounded-full px-3.5 text-[13px] font-semibold text-gold-hi shadow-[inset_0_0_0_1px_color-mix(in_srgb,var(--gold)_55%,transparent)] active:scale-[0.98]"
       >
         {connecting ? "Connecting…" : "Connect"}
@@ -29,7 +30,8 @@ export function WalletChip() {
 
   const address = publicKey.toBase58();
   return (
-    <Dialog.Root open={open} onOpenChange={setOpen}>
+    // Closed by a disconnect from the wallet's side too, so it can't reopen by itself later
+    <Dialog.Root open={connected && open} onOpenChange={setOpen}>
       <Dialog.Trigger
         className="bz-hit inline-flex h-8 shrink-0 items-center gap-2 rounded-full bg-card pl-2.5 pr-3 font-mono text-[12.5px] shadow-[inset_0_0_0_1px_var(--border)] active:scale-[0.98]"
         aria-label={`Wallet ${shortAddress(address)}`}
@@ -77,10 +79,9 @@ function WalletSheet({ address, onClose }: { address: string; onClose: () => voi
         <button
           onClick={copy}
           className="mt-4 grid w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-3 rounded-[16px] bg-card px-4 py-3.5 text-left shadow-[inset_0_0_0_1px_var(--border)] active:scale-[0.99]"
-          aria-label={copied ? "Address copied" : "Copy address"}
         >
           <span className="break-all font-mono text-[13px] leading-snug">{address}</span>
-          <span className={cn("flex items-center gap-1 text-[12.5px] font-semibold", copied ? "text-glow" : "text-gold-hi")}>
+          <span aria-live="polite" className={cn("flex items-center gap-1 text-[12.5px] font-semibold", copied ? "text-glow" : "text-gold-hi")}>
             <Icon name={copied ? "check" : "copy"} className="size-4" />
             {copied ? "Copied" : "Copy"}
           </span>
@@ -112,6 +113,8 @@ function WalletSheet({ address, onClose }: { address: string; onClose: () => voi
             onClose();
             disconnect();
             toast("Wallet disconnected");
+            // The chip turns back into Connect: keep keyboard focus there, not on <body>
+            setTimeout(() => document.querySelector<HTMLButtonElement>("header [data-connect]")?.focus(), 50);
           }}
         >
           Disconnect

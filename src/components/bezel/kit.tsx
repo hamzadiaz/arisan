@@ -1,6 +1,6 @@
 "use client";
 
-import { type ButtonHTMLAttributes, type ReactNode, useRef, useState } from "react";
+import { type ButtonHTMLAttributes, type ReactNode, type Ref, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
 import { Icon, type IconName } from "./icons";
 
@@ -21,11 +21,19 @@ export function Button({
   className,
   children,
   disabled,
+  ref,
   ...rest
-}: ButtonHTMLAttributes<HTMLButtonElement> & { tone?: ButtonTone; icon?: IconName; busy?: boolean; busyLabel?: string }) {
+}: ButtonHTMLAttributes<HTMLButtonElement> & {
+  tone?: ButtonTone;
+  icon?: IconName;
+  busy?: boolean;
+  busyLabel?: string;
+  ref?: Ref<HTMLButtonElement>;
+}) {
   return (
     <button
       {...rest}
+      ref={ref}
       disabled={disabled || busy}
       aria-busy={busy || undefined}
       className={cn("bz-button", `bz-button-${busy ? "quiet" : tone}`, className)}
@@ -153,9 +161,12 @@ export function CodeBoxes({
         onFocus={() => setFocused(true)}
         onBlur={() => setFocused(false)}
         onSelect={(e) => {
-          // The drawn caret sits after the last character; keep the real one there too
+          // The drawn caret sits after the last character; keep the real one there too.
+          // Leave real selections (select-all, then type to replace) alone.
           const el = e.currentTarget;
-          if (el.selectionStart !== el.value.length) el.setSelectionRange(el.value.length, el.value.length);
+          if (el.selectionStart === el.selectionEnd && el.selectionStart !== el.value.length) {
+            el.setSelectionRange(el.value.length, el.value.length);
+          }
         }}
         placeholder={placeholder}
         aria-label={label}
@@ -215,6 +226,18 @@ export function SeatRuler({ value, min = 2, max = 20, onChange, disabled }: { va
         ))}
       </div>
     </div>
+  );
+}
+
+/** Under a disabled money button: why, and where to get devnet SOL. */
+export function LowFunds() {
+  return (
+    <>
+      <span className="text-signal">Not enough SOL.</span>{" "}
+      <a href="https://faucet.solana.com" target="_blank" rel="noopener noreferrer" className="bz-link">
+        Get devnet SOL
+      </a>
+    </>
   );
 }
 

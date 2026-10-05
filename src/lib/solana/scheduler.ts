@@ -5,10 +5,11 @@
  * Used by the Vercel cron job to trigger draws without user intervention.
  */
 
-import { Connection, Keypair, PublicKey, SystemProgram, Transaction, VersionedTransaction, sendAndConfirmTransaction } from "@solana/web3.js";
+import { ComputeBudgetProgram, Connection, Keypair, PublicKey, SystemProgram, Transaction, VersionedTransaction, sendAndConfirmTransaction } from "@solana/web3.js";
 import { Program, AnchorProvider } from "@coral-xyz/anchor";
-import { getProgram, OnChainPool, OnChainMember, getPoolStatusString, getDrawPDA, getVaultPDA, getMemberPDA } from "./program";
+import { getProgram, OnChainPool, OnChainMember, getPoolStatusString, getDrawPDA, getVaultPDA, getMemberPDA, getPaymentPDA } from "./program";
 import { SLOT_HASHES_SYSVAR, isDrawEligible, readSlotHash, selectDerivedWinner } from "./bound-draw";
+import { settleRound } from "./round-settlement";
 import bs58 from "bs58";
 
 // Wallet interface compatible with AnchorProvider
@@ -71,8 +72,17 @@ export interface DrawResult {
   amount: number;
   signature: string;
   success: boolean;
+  /** Not drawn this time, by rule (a seat in grace still owes the round, or nobody can win) */
+  skipped?: boolean;
   error?: string;
 }
+
+/** mark_defaulter instructions per transaction */
+const MARK_BATCH = 8;
+/** Lamports a data-less account needs to stay open; a vault left with less fails the payout. */
+const RENT_EXEMPT_EMPTY = 890_880;
+/** execute_draw loads and checks every roster member; 20 seats can pass the 200k default. */
+const DRAW_COMPUTE_UNITS = 400_000;
 
 // ============ Connection Setup ============
 
@@ -295,8 +305,120 @@ export async function executeDraw(
   try {
     let poolAccount = await accounts.pool.fetch(poolAddress);
     const round = poolAccount.currentRound as number;
+    const skip = (reason: string): DrawResult => ({
+      poolAddress: poolAddress.toBase58(),
+      round,
+      winner: "",
+      amount: 0,
+      signature: "",
+      success: false,
+      skipped: true,
+      error: reason,
+    });
+
+    const roster: PublicKey[] = (poolAccount.memberWallets as PublicKey[])
+      .slice(0, poolAccount.rosterLen as number)
+      .filter((wallet) => !wallet.equals(PublicKey.default));
+    const memberAccounts = roster.map((wallet) => getMemberPDA(poolAddress, wallet)[0]);
+    const memberName = program.idl.accounts?.find((a) => a.name.toLowerCase() === "member")?.name ?? "member";
+    const readMembers = async () => {
+      const infos = await connection.getMultipleAccountsInfo(memberAccounts, "confirmed");
+      return infos.map((info) => (info ? (program.coder.accounts.decode(memberName, info.data) as OnChainMember) : null));
+    };
+
+    // Settle the round before committing: seats that missed it are marked, so their slashed
+    // stake covers the pot and they can't win it; a seat still in grace from an earlier round
+    // holds the draw. The app follows the same rule (round-settlement.ts). A commit already
+    // made for this round skips straight to the execute: it expires in 512 slots.
+    if (poolAccount.randomnessRound !== round) {
+      const nowSec = (await connection.getBlockTime(await connection.getSlot("confirmed"))) ?? Math.floor(Date.now() / 1000);
+      const deadlineSec = poolAccount.nextDrawTimestamp.toNumber();
+      if (nowSec <= deadlineSec) return skip("Round not due on-chain yet");
+      const rules = {
+        nowSec,
+        deadlineSec,
+        gracePeriodSeconds: poolAccount.gracePeriodSeconds.toNumber(),
+        stakeEnabled: poolAccount.stakeEnabled as boolean,
+      };
+      const seatsOf = async () => {
+        const [members, payments] = await Promise.all([
+          readMembers(),
+          connection.getMultipleAccountsInfo(
+            roster.map((wallet) => getPaymentPDA(poolAddress, wallet, round)[0]),
+            "confirmed"
+          ),
+        ]);
+        return roster.map((wallet, i) => ({
+          wallet: wallet.toBase58(),
+          paid: !!payments[i] && payments[i]!.owner.equals(program.programId) && payments[i]!.data.length > 0,
+          isKicked: members[i]?.isKicked ?? true,
+          inGracePeriod: !!members[i]?.inGracePeriod,
+          inDefault: !!members[i]?.inDefault,
+          graceDeadline: members[i]?.graceDeadline ? Number(members[i]!.graceDeadline.toString()) : 0,
+        }));
+      };
+
+      const { toMark } = settleRound(await seatsOf(), rules);
+      for (let i = 0; i < toMark.length; i += MARK_BATCH) {
+        const markTx = new Transaction();
+        for (const address of toMark.slice(i, i + MARK_BATCH)) {
+          const wallet = new PublicKey(address);
+          markTx.add(
+            await program.methods
+              .markDefaulter()
+              .accounts({
+                caller: keypair.publicKey,
+                pool: poolAddress,
+                member: getMemberPDA(poolAddress, wallet)[0],
+                payment: getPaymentPDA(poolAddress, wallet, round)[0],
+                vault: getVaultPDA(poolAddress)[0],
+                systemProgram: SystemProgram.programId,
+              })
+              .instruction()
+          );
+        }
+        await sendSchedulerTx(connection, keypair, markTx);
+        console.log(`Marked ${Math.min(MARK_BATCH, toMark.length - i)} missed payment(s) in ${poolAddress.toBase58()}`);
+      }
+
+      const { waiting } = settleRound(await seatsOf(), rules);
+      if (waiting.length > 0) return skip(`Waiting for ${waiting.length} seat(s) in grace to pay`);
+    }
+
+    const eligibleNow = async () => {
+      const members = await readMembers();
+      return roster.filter((wallet, i) => {
+        const member = members[i];
+        return (
+          !!member &&
+          isDrawEligible({
+            wallet,
+            hasWon: member.hasWon,
+            inDefault: member.inDefault,
+            isKicked: member.isKicked,
+            inGracePeriod: member.inGracePeriod,
+          })
+        );
+      });
+    };
+    // Nobody left to win: never commit, the commit can't be undone
+    if ((await eligibleNow()).length === 0) return skip("No eligible members");
+
+    const [vaultPDA] = getVaultPDA(poolAddress);
+    const vaultFor = async () => {
+      const members = await readMembers();
+      const balance = BigInt(await connection.getBalance(vaultPDA, "confirmed"));
+      const pot = BigInt(poolAccount.contributionAmount.toString()) * BigInt(poolAccount.memberCount);
+      const owed = members.reduce(
+        (sum, m) => sum + (m?.stakeDeposited ? BigInt(m.stakeAmount.toString()) : BigInt(0)),
+        BigInt(0)
+      );
+      return { balance, pot, ok: balance - pot >= owed, covers: balance >= pot };
+    };
 
     if (poolAccount.randomnessRound !== round) {
+      // The pot must come from this round's payments and slashed stakes, never stakes owed back
+      if (!(await vaultFor()).ok) return skip("Vault can't cover the pot without spending stakes");
       const commitTx = await program.methods
         .commitDrawRandomness()
         .accounts({
@@ -306,6 +428,10 @@ export async function executeDraw(
         .transaction();
       await sendSchedulerTx(connection, keypair, commitTx);
       poolAccount = await accounts.pool.fetch(poolAddress);
+      // The commit takes no round: if it landed on another one, leave it for that round's run
+      if (!("active" in poolAccount.status) || poolAccount.currentRound !== round || poolAccount.randomnessRound !== round) {
+        throw new Error(`Commit landed outside round ${round}`);
+      }
     }
 
     const committedSlot = BigInt(poolAccount.randomnessSlot.toString());
@@ -321,33 +447,12 @@ export async function executeDraw(
       throw new Error("Committed slot hash was not available");
     }
 
-    const roster: PublicKey[] = (poolAccount.memberWallets as PublicKey[]).slice(
-      0,
-      poolAccount.rosterLen as number
-    );
-    const memberAccounts: PublicKey[] = [];
-    const eligible: PublicKey[] = [];
-    for (const wallet of roster) {
-      if (wallet.equals(PublicKey.default)) continue;
-      const [memberPDA] = getMemberPDA(poolAddress, wallet);
-      memberAccounts.push(memberPDA);
-      const member = (await accounts.member.fetch(memberPDA)) as OnChainMember;
-      if (
-        isDrawEligible({
-          wallet,
-          hasWon: member.hasWon,
-          inDefault: member.inDefault,
-          isKicked: member.isKicked,
-          inGracePeriod: member.inGracePeriod,
-        })
-      ) {
-        eligible.push(wallet);
-      }
-    }
-
+    const eligible = await eligibleNow();
     const derivedWinner = selectDerivedWinner(hash, eligible);
     const [drawPDA] = getDrawPDA(poolAddress, round);
-    const [vaultPDA] = getVaultPDA(poolAddress);
+    // Once committed, finishing is the only way to keep the circle going: only require the pot
+    const vault = await vaultFor();
+    if (!vault.covers) throw new Error("Vault can't cover the pot");
     const executeTx = await program.methods
       .executeDraw()
       .accounts({
@@ -367,6 +472,15 @@ export async function executeDraw(
         }))
       )
       .transaction();
+    const before = [ComputeBudgetProgram.setComputeUnitLimit({ units: DRAW_COMPUTE_UNITS })];
+    const left = vault.balance - vault.pot;
+    if (left > BigInt(0) && left < BigInt(RENT_EXEMPT_EMPTY)) {
+      // Dust in the vault would leave it below rent after the payout
+      before.push(
+        SystemProgram.transfer({ fromPubkey: keypair.publicKey, toPubkey: vaultPDA, lamports: RENT_EXEMPT_EMPTY - Number(left) })
+      );
+    }
+    executeTx.instructions.unshift(...before);
     const signature = await sendSchedulerTx(connection, keypair, executeTx);
 
     return {
@@ -401,6 +515,7 @@ export async function processDraws(): Promise<{
   processed: number;
   successful: number;
   failed: number;
+  skipped: number;
   results: DrawResult[];
 }> {
   console.log("=== Starting Draw Scheduler ===");
@@ -409,6 +524,7 @@ export async function processDraws(): Promise<{
   const results: DrawResult[] = [];
   let successful = 0;
   let failed = 0;
+  let skipped = 0;
 
   try {
     // Setup
@@ -438,6 +554,8 @@ export async function processDraws(): Promise<{
 
       if (result.success) {
         successful++;
+      } else if (result.skipped) {
+        skipped++;
       } else {
         failed++;
       }
@@ -451,12 +569,13 @@ export async function processDraws(): Promise<{
   }
 
   console.log(`\n=== Scheduler Complete ===`);
-  console.log(`Processed: ${results.length}, Successful: ${successful}, Failed: ${failed}`);
+  console.log(`Processed: ${results.length}, Successful: ${successful}, Skipped: ${skipped}, Failed: ${failed}`);
 
   return {
     processed: results.length,
     successful,
     failed,
+    skipped,
     results,
   };
 }

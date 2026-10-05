@@ -3,11 +3,12 @@
 import { useMemo, useCallback, useState } from "react";
 import { useConnection, useWallet } from "@solana/wallet-adapter-react";
 import { Program, AnchorProvider, BN } from "@coral-xyz/anchor";
-import { PublicKey, Transaction } from "@solana/web3.js";
+import { ComputeBudgetProgram, PublicKey, SystemProgram, Transaction } from "@solana/web3.js";
 import {
   createProvider,
   getProgram,
   getMemberPDA,
+  getVaultPDA,
   PROGRAM_ID,
 } from "@/lib/solana/program";
 import {
@@ -60,7 +61,10 @@ import {
 /** Draw failures the page explains in its own words. */
 export const DRAW_ERROR = {
   alreadyDrawn: "draw:already-drawn",
+  alreadyStarted: "draw:already-started",
+  roundMoved: "draw:round-moved",
   noWinner: "draw:no-winner",
+  vaultShort: "draw:vault-short",
   expired: "draw:expired",
   notReady: "draw:not-ready",
 } as const;
@@ -69,6 +73,10 @@ export const DRAW_ERROR = {
 const SLOT_HASH_WINDOW = 512;
 /** Instructions per transaction when marking or refunding several seats. */
 const MARK_BATCH = 8;
+/** Lamports a data-less account needs to stay open; a vault left with less fails the transfer. */
+const RENT_EXEMPT_EMPTY = 890_880;
+/** execute_draw loads and checks every roster member; 20 seats can pass the 200k default. */
+const DRAW_COMPUTE_UNITS = 400_000;
 
 // Hook to get the Anchor program instance.
 // Without a connected wallet it returns a read-only program so pool data
@@ -136,7 +144,13 @@ export function useSolanaPoolActions() {
   // Helper to send and confirm transaction
   // Works with both web3 and custodial wallets
   const sendTransactionHelper = useCallback(
-    async (transaction: Transaction, action: string, fetchLogs = false): Promise<TransactionResult> => {
+    async (
+      transaction: Transaction,
+      action: string,
+      fetchLogs = false,
+      /** Runs after the wallet signs and before sending; a non-null answer cancels the send. */
+      recheck?: () => Promise<string | null>
+    ): Promise<TransactionResult> => {
       if (!walletAddress) {
         return { success: false, error: "Wallet not connected" };
       }
@@ -165,15 +179,31 @@ export function useSolanaPoolActions() {
           transaction.recentBlockhash = blockhash;
           transaction.feePayer = walletAddress;
 
-          // Use wallet adapter's sendTransaction - handles signing internally
-          signature = await wallet.sendTransaction(transaction, connection);
+          if (recheck && wallet.signTransaction) {
+            const signed = await wallet.signTransaction(transaction);
+            const problem = await recheck();
+            if (problem) {
+              return { success: false, error: problem };
+            }
+            signature = await connection.sendRawTransaction(signed.serialize());
+          } else {
+            // Use wallet adapter's sendTransaction - handles signing internally
+            signature = await wallet.sendTransaction(transaction, connection);
+          }
 
-          // Confirm
-          await connection.confirmTransaction({
+          // Confirm. A transaction that lands but fails comes back as value.err, not a throw.
+          const confirmation = await connection.confirmTransaction({
             signature,
             blockhash,
             lastValidBlockHeight,
           });
+          if (confirmation.value.err) {
+            return {
+              success: false,
+              signature,
+              error: `Transaction failed on-chain: ${JSON.stringify(confirmation.value.err)}`,
+            };
+          }
         }
 
         // Optionally fetch transaction logs (needed for createPool to get invite code)
@@ -220,6 +250,22 @@ export function useSolanaPoolActions() {
       }
     },
     [connection, wallet, walletAddress, isCustodial, sendCustodialTransaction]
+  );
+
+  // A vault left between zero and rent-exempt makes the payout fail (someone can send it dust).
+  // Top it up from the caller in the same transaction; it costs at most 0.00089 SOL.
+  const topUpVault = useCallback(
+    async (transaction: Transaction, poolAddress: PublicKey, payout: bigint) => {
+      if (!walletAddress) return;
+      const [vaultPDA] = getVaultPDA(poolAddress);
+      const left = BigInt(await connection.getBalance(vaultPDA, "confirmed")) - payout;
+      if (left > BigInt(0) && left < BigInt(RENT_EXEMPT_EMPTY)) {
+        transaction.instructions.unshift(
+          SystemProgram.transfer({ fromPubkey: walletAddress, toPubkey: vaultPDA, lamports: RENT_EXEMPT_EMPTY - Number(left) })
+        );
+      }
+    },
+    [connection, walletAddress]
   );
 
   // Create a new pool on-chain
@@ -341,7 +387,9 @@ export function useSolanaPoolActions() {
 
   // Deposit stake
   const depositStake = useCallback(
-    async (params: DepositStakeParams): Promise<TransactionResult> => {
+    // payRound: also pay that round in the same transaction. A restake alone leaves the seat
+    // unpaid and markable again, which would slash the new stake too.
+    async (params: DepositStakeParams & { payRound?: number }): Promise<TransactionResult> => {
       if (!program || !walletAddress) {
         return { success: false, error: "Program not initialized" };
       }
@@ -350,11 +398,16 @@ export function useSolanaPoolActions() {
       setError(null);
 
       try {
-        const transaction = await buildDepositStakeTransaction(
-          program,
-          walletAddress,
-          params
-        );
+        const transaction = await buildDepositStakeTransaction(program, walletAddress, {
+          poolAddress: params.poolAddress,
+        });
+        if (params.payRound) {
+          const pay = await buildMakePaymentTransaction(program, walletAddress, {
+            poolAddress: params.poolAddress,
+            round: params.payRound,
+          });
+          transaction.add(...pay.instructions);
+        }
 
         const result = await sendTransactionHelper(transaction, "deposit_stake");
         if (!result.success) {
@@ -471,12 +524,14 @@ export function useSolanaPoolActions() {
     [program, walletAddress, sendTransactionHelper]
   );
 
-  // Commit the draw slot, then pay the member derived from that slot hash.
+  // The draw, one step per tap: the first commits the slot whose hash will pick the winner,
+  // the second pays the member derived from it. Two taps, not one tap and a second wallet
+  // prompt: a wallet launch without a tap can be blocked (Android Mobile Wallet Adapter).
   const executeDraw = useCallback(
     // The hook derives the winner and the member accounts itself; callers give pool and round.
     async (
       params: Pick<ExecuteDrawParams, "poolAddress" | "round">
-    ): Promise<TransactionResult & { committed?: boolean }> => {
+    ): Promise<TransactionResult & { committed?: boolean; stage?: "committed" | "drawn" }> => {
       if (!program || !walletAddress) {
         return { success: false, error: "Program not initialized" };
       }
@@ -489,11 +544,13 @@ export function useSolanaPoolActions() {
         const accounts = program.account as any;
         const memberName =
           program.idl.accounts?.find((a) => a.name.toLowerCase() === "member")?.name ?? "member";
+        const [vaultPDA] = getVaultPDA(params.poolAddress);
+        const sameRound = (p: any) => "active" in p.status && p.currentRound === params.round;
         let poolAccount = await accounts.pool.fetch(params.poolAddress);
 
         // A stale page can still offer a round that was already drawn. Committing for the
         // chain's next round from here would lock that round once the commit expires.
-        if (!("active" in poolAccount.status) || poolAccount.currentRound !== params.round) {
+        if (!sameRound(poolAccount)) {
           return { success: false, error: DRAW_ERROR.alreadyDrawn };
         }
 
@@ -501,43 +558,71 @@ export function useSolanaPoolActions() {
           .slice(0, poolAccount.rosterLen as number)
           .filter((wallet) => !wallet.equals(PublicKey.default));
         const memberAccounts = roster.map((wallet) => getMemberPDA(params.poolAddress, wallet)[0]);
-        const eligibleWallets = async () => {
+        const readMembers = async () => {
           const infos = await connection.getMultipleAccountsInfo(memberAccounts, "confirmed");
-          return roster.filter((wallet, i) => {
-            const info = infos[i];
-            if (!info) return false;
-            const member = program.coder.accounts.decode(memberName, info.data);
-            return isDrawEligible({
-              wallet,
-              hasWon: member.hasWon,
-              inDefault: member.inDefault,
-              isKicked: member.isKicked,
-              inGracePeriod: member.inGracePeriod,
-            });
+          return infos.map((info) => (info ? (program.coder.accounts.decode(memberName, info.data) as any) : null));
+        };
+        const eligibleOf = (members: any[]) =>
+          roster.filter((wallet, i) => {
+            const member = members[i];
+            return (
+              !!member &&
+              isDrawEligible({
+                wallet,
+                hasWon: member.hasWon,
+                inDefault: member.inDefault,
+                isKicked: member.isKicked,
+                inGracePeriod: member.inGracePeriod,
+              })
+            );
           });
+        // The vault pays contribution × member_count and must still hold every stake owed back.
+        const vaultFor = async (members: any[]) => {
+          const balance = BigInt(await connection.getBalance(vaultPDA, "confirmed"));
+          const pot = BigInt(poolAccount.contributionAmount.toString()) * BigInt(poolAccount.memberCount);
+          const owed = members.reduce(
+            (sum: bigint, m: any) => sum + (m?.stakeDeposited ? BigInt(m.stakeAmount.toString()) : BigInt(0)),
+            BigInt(0)
+          );
+          // ok: pays the pot and keeps every stake owed back; covers: can pay the pot at all
+          return { balance, pot, ok: balance - pot >= owed, covers: balance >= pot };
         };
 
-        // Nobody left to win: stop before the commit, which can't be undone.
-        if ((await eligibleWallets()).length === 0) {
-          return { success: false, error: DRAW_ERROR.noWinner };
-        }
-
         if (poolAccount.randomnessRound !== params.round) {
+          // Step one: commit. Nothing here can be undone, so check everything first.
+          const members = await readMembers();
+          if (eligibleOf(members).length === 0) {
+            return { success: false, error: DRAW_ERROR.noWinner };
+          }
+          if (!(await vaultFor(members)).ok) {
+            return { success: false, error: DRAW_ERROR.vaultShort };
+          }
           const commitTx = await buildCommitDrawTransaction(
             program,
             walletAddress,
             params.poolAddress
           );
-          const result = await sendTransactionHelper(commitTx, "commit_draw_randomness");
+          // Sign, look again, then send: the commit takes no round, so it must not go out
+          // if the round moved or someone started this draw while the wallet was open.
+          const result = await sendTransactionHelper(commitTx, "commit_draw_randomness", false, async () => {
+            const now = await accounts.pool.fetch(params.poolAddress);
+            if (!sameRound(now)) return DRAW_ERROR.alreadyDrawn;
+            if (now.randomnessRound === params.round) return DRAW_ERROR.alreadyStarted;
+            return null;
+          });
           if (!result.success) {
-            setError(result.error || "Failed to commit draw randomness");
+            setError(result.error || "Failed to start the draw");
             return result;
           }
           poolAccount = await accounts.pool.fetch(params.poolAddress);
+          if (!sameRound(poolAccount) || poolAccount.randomnessRound !== params.round) {
+            return { success: false, error: DRAW_ERROR.roundMoved, signature: result.signature };
+          }
+          return { ...result, committed: true, stage: "committed" };
         }
-        committed = true;
 
-        // The slot hash must land before the commit is older than the SlotHashes window.
+        // Step two: the slot hash must land before the commit is older than the SlotHashes window.
+        committed = true;
         const committedSlot = BigInt(poolAccount.randomnessSlot.toString());
         const expiresAt = committedSlot + BigInt(SLOT_HASH_WINDOW);
         let hash: Uint8Array | null = null;
@@ -558,9 +643,16 @@ export function useSolanaPoolActions() {
           return { success: false, error: DRAW_ERROR.notReady, committed };
         }
 
-        const eligible = await eligibleWallets();
+        const members = await readMembers();
+        const eligible = eligibleOf(members);
         if (eligible.length === 0) {
           return { success: false, error: DRAW_ERROR.noWinner, committed };
+        }
+        // Once committed, finishing is the only way to keep the circle going (an expired commit
+        // locks it for good), so this step only needs the vault to cover the pot.
+        const vault = await vaultFor(members);
+        if (!vault.covers) {
+          return { success: false, error: DRAW_ERROR.vaultShort, committed };
         }
 
         const transaction = await buildExecuteDrawTransaction(program, walletAddress, {
@@ -569,11 +661,25 @@ export function useSolanaPoolActions() {
           derivedWinner: selectDerivedWinner(hash, eligible),
           memberAccounts,
         });
+        // Twenty seats can outgrow the default compute budget, and dust in the vault must
+        // not leave it between zero and rent-exempt after the payout.
+        const before = [ComputeBudgetProgram.setComputeUnitLimit({ units: DRAW_COMPUTE_UNITS })];
+        const left = vault.balance - vault.pot;
+        if (left > BigInt(0) && left < BigInt(RENT_EXEMPT_EMPTY)) {
+          before.push(
+            SystemProgram.transfer({ fromPubkey: walletAddress, toPubkey: vaultPDA, lamports: RENT_EXEMPT_EMPTY - Number(left) })
+          );
+        }
+        transaction.instructions.unshift(...before);
         const result = await sendTransactionHelper(transaction, "execute_draw");
         if (!result.success) {
           setError(result.error || "Failed to execute draw");
+          // Someone else's execute created this round's Draw account first
+          if (/already in use/i.test(result.error ?? "")) {
+            return { success: false, error: DRAW_ERROR.alreadyDrawn, committed };
+          }
         }
-        return { ...result, committed };
+        return { ...result, committed, stage: "drawn" };
       } catch (err: any) {
         console.error("Draw failed:", err);
         const errorMsg = err.message || "Failed to execute draw";
@@ -635,7 +741,7 @@ export function useSolanaPoolActions() {
 
   // Rejoin after being removed: pays a fresh stake plus the missed rounds.
   const rejoinPool = useCallback(
-    async (params: RejoinPoolParams): Promise<TransactionResult> => {
+    async (params: RejoinPoolParams & { payRound?: number }): Promise<TransactionResult> => {
       if (!program || !walletAddress) {
         return { success: false, error: "Program not initialized" };
       }
@@ -644,7 +750,16 @@ export function useSolanaPoolActions() {
       setError(null);
 
       try {
-        const transaction = await buildRejoinPoolTransaction(program, walletAddress, params);
+        const transaction = await buildRejoinPoolTransaction(program, walletAddress, {
+          poolAddress: params.poolAddress,
+        });
+        if (params.payRound) {
+          const pay = await buildMakePaymentTransaction(program, walletAddress, {
+            poolAddress: params.poolAddress,
+            round: params.payRound,
+          });
+          transaction.add(...pay.instructions);
+        }
         const result = await sendTransactionHelper(transaction, "rejoin_pool");
         if (!result.success) {
           setError(result.error || "Failed to rejoin");
@@ -674,10 +789,20 @@ export function useSolanaPoolActions() {
       try {
         let result: TransactionResult = { success: false, error: "No stakes to return" };
         for (let i = 0; i < params.wallets.length; i += MARK_BATCH) {
+          const batch = params.wallets.slice(i, i + MARK_BATCH);
           const transaction = await buildRefundAllStakesTransaction(program, walletAddress, {
             poolAddress: params.poolAddress,
-            memberWallets: params.wallets.slice(i, i + MARK_BATCH),
+            memberWallets: batch,
           });
+          const accounts = program.account as any;
+          const stakes = await Promise.all(
+            batch.map((wallet) => accounts.member.fetch(getMemberPDA(params.poolAddress, wallet)[0]))
+          );
+          await topUpVault(
+            transaction,
+            params.poolAddress,
+            stakes.reduce((sum: bigint, m: any) => sum + BigInt(m.stakeAmount.toString()), BigInt(0))
+          );
           result = await sendTransactionHelper(transaction, "refund_all_stakes");
           if (!result.success) {
             setError(result.error || "Failed to return stakes");
@@ -693,7 +818,7 @@ export function useSolanaPoolActions() {
         setIsLoading(false);
       }
     },
-    [program, walletAddress, sendTransactionHelper]
+    [program, walletAddress, sendTransactionHelper, topUpVault]
   );
 
   // Claim winnings
@@ -745,6 +870,9 @@ export function useSolanaPoolActions() {
           walletAddress,
           params
         );
+        const accounts = program.account as any;
+        const mine = await accounts.member.fetch(getMemberPDA(params.poolAddress, walletAddress)[0]);
+        await topUpVault(transaction, params.poolAddress, BigInt(mine.stakeAmount.toString()));
 
         const result = await sendTransactionHelper(transaction, "claim_stake_refund");
         if (!result.success) {
@@ -759,7 +887,7 @@ export function useSolanaPoolActions() {
         setIsLoading(false);
       }
     },
-    [program, walletAddress, sendTransactionHelper]
+    [program, walletAddress, sendTransactionHelper, topUpVault]
   );
 
   return {

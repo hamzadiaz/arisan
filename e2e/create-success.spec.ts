@@ -83,7 +83,7 @@ test("Automatic draws create an auto circle, and its seat takes the stake on joi
   await page.getByPlaceholder("Family circle").fill("Office lunch");
   await page.getByPlaceholder("0.5").fill("0.25");
   await page.getByRole("button", { name: "Automatic", exact: true }).click();
-  await expect(page.getByText("Starts when full, draws on its own")).toBeVisible();
+  await expect(page.getByText("Starts when full. Draws itself.")).toBeVisible();
   await page.getByRole("button", { name: "Create circle" }).click();
 
   await expect(page.getByRole("button", { name: "Take your seat · 0.25 SOL stake" })).toBeVisible({ timeout: 20_000 });

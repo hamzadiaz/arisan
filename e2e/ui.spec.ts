@@ -244,7 +244,7 @@ test.describe("7. Pool detail", () => {
     await expect(page.locator("header h1")).toHaveText(MOCK_POOL.name);
     await expect(page.getByText("2.5 SOL", { exact: true })).toBeVisible(); // pot
     await expect(page.getByText("0.5 SOL / round")).toBeVisible();
-    await expect(page.getByText(/joined$/)).toBeVisible();
+    await expect(page.getByText("0.5 SOL a round · 5 rounds")).toBeVisible();
     await proof(page, "07a-pool-detail");
   });
 

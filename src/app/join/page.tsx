@@ -9,7 +9,7 @@ import { toast } from "sonner";
 import { AppShell, StatusPill } from "@/components/mobile/app-shell";
 import { MiniDial } from "@/components/bezel/mini-dial";
 import { Icon } from "@/components/bezel/icons";
-import { Button, CodeBoxes, Label, Note } from "@/components/bezel/kit";
+import { Button, CodeBoxes, Label, LowFunds, Note } from "@/components/bezel/kit";
 import { dialFromPoolOnly } from "@/components/bezel/dial-spec";
 import { useSolanaPoolActions, useSolanaPoolData } from "@/hooks/use-solana-program";
 import { useBalance } from "@/hooks/use-balance";
@@ -124,7 +124,7 @@ export default function JoinPage() {
         />
         <div className="mt-3 flex items-center justify-between gap-3">
           <p id="join-code-help" role="status" className={notFound ? "bz-help bz-help-signal m-0" : "bz-help m-0"}>
-            {notFound ? "No circle with that code." : "Get the code from whoever made the circle."}
+            {notFound ? "No circle with that code." : "Ask the host for the code."}
           </p>
           <button onClick={paste} disabled={searching || joining} className="bz-hit inline-flex h-8 shrink-0 items-center gap-1.5 rounded-full bg-card px-3 text-[13px] font-medium shadow-[inset_0_0_0_1px_var(--border)] active:scale-[0.98]">
             <Icon name="paste" className="size-4" />
@@ -153,16 +153,16 @@ export default function JoinPage() {
 
         {pool && (
           <>
-            <div ref={card} tabIndex={-1} aria-label={`Found: ${pool.name}`} className="mt-5 rounded-[20px] bg-card p-4 shadow-[inset_0_0_0_1px_var(--border)] outline-none">
+            <div ref={card} tabIndex={-1} role="region" aria-label={`Found: ${pool.name}`} className="mt-5 rounded-[20px] bg-card p-4 shadow-[inset_0_0_0_1px_var(--border)] outline-none">
               <div className="grid grid-cols-[56px_minmax(0,1fr)_auto] items-center gap-3.5">
                 <MiniDial spec={dialFromPoolOnly(pool)} className="size-14" />
                 <div className="min-w-0">
                   <h2 className="truncate text-[18px] font-semibold tracking-[-0.01em]">{pool.name}</h2>
                   <p className="mt-0.5 text-[13px] text-muted-foreground">
-                    <span className="font-mono text-foreground">{`${amount} ${currency}`}</span> per round
+                    <span className="font-medium tabular-nums text-foreground">{`${amount} ${currency}`}</span> per round
                   </p>
                 </div>
-                <StatusPill status={pool.status} />
+                <StatusPill status={pool.status} label={pool.status === "pending" && full ? "Full" : undefined} />
               </div>
               <dl className="mt-4 grid grid-cols-3 gap-2 border-t border-border pt-3.5">
                 <div>
@@ -195,20 +195,16 @@ export default function JoinPage() {
                   ? "Circle is full"
                   : !connected
                     ? "Connect wallet to join"
-                    : short
-                      ? "Not enough SOL"
-                      : joinStake > 0
+                    : joinStake > 0
                         ? `Join · ${formatAmount(joinStake, pool.currency)} stake`
                         : "Join circle"}
             </Button>
             {pool.status === "pending" && !full && connected && (
               <p className="bz-help text-center">
                 {short ? (
-                  <a href="https://faucet.solana.com" target="_blank" rel="noopener noreferrer" className="bz-link">
-                    Get devnet SOL
-                  </a>
+                  <LowFunds />
                 ) : pool.autoMode ? (
-                  "Your stake goes in now. It starts when every seat is taken."
+                  joinStake > 0 ? "Your stake goes in now. Starts when full." : "Starts when full."
                 ) : stakeEach > 0 ? (
                   "Your wallet asks you to approve. The stake comes after."
                 ) : (

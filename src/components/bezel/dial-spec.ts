@@ -52,7 +52,9 @@ export function dialFromPool(
   members: FetchedMember[],
   payments: FetchedPayment[],
   _draws: FetchedDraw[],
-  me?: string
+  me?: string,
+  /** After the round's deadline an unpaid seat reads as late, as the seat list says Due */
+  now?: number
 ): DialSpec {
   const seats = Math.max(pool.maxMembers, members.length);
   const ordered = orderedSeats(members);
@@ -68,7 +70,13 @@ export function dialFromPool(
     staked: at((m) => m.stakeDeposited),
     paid: at((m) => paidNow.has(m.walletAddress)),
     won: at((m) => m.hasWon),
-    late: at((m) => m.isKicked || m.inGracePeriod || m.inDefault),
+    late: at(
+      (m) =>
+        m.isKicked ||
+        m.inGracePeriod ||
+        m.inDefault ||
+        (mode === "active" && now !== undefined && now > pool.nextDrawDate.getTime() && !paidNow.has(m.walletAddress))
+    ),
     you: me && seatOf.has(me) ? seatOf.get(me)! : -1,
     round: Math.max(1, pool.currentRound),
   };

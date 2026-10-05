@@ -130,7 +130,9 @@
 
 @layer base {
   * {
-    @apply border-border outline-ring/50;
+    @apply border-border;
+    /* Every focus ring, not just the kit's: 6:1 on the light page, 13:1 on the dark one */
+    outline-color: var(--focus);
   }
 
   body {
@@ -196,6 +198,7 @@
   }
 
   .bz-help {
+    text-wrap: pretty;
     margin: 8px 4px 0;
     font-size: 12.5px;
     line-height: 1.4;
@@ -402,6 +405,7 @@
   }
 
   .bz-note {
+    text-wrap: pretty;
     display: grid;
     grid-template-columns: 18px minmax(0, 1fr);
     gap: 10px;
@@ -496,7 +500,7 @@
 
   .bz-field input::placeholder {
     color: var(--muted-foreground);
-    opacity: 0.75;
+    opacity: 0.9;
     font-weight: 400;
   }
 
@@ -551,7 +555,7 @@
 
   .bz-code span.bz-code-empty {
     color: var(--muted-foreground);
-    opacity: 0.55;
+    opacity: 0.72;
   }
 
   .bz-code span.bz-code-caret {
@@ -766,6 +770,7 @@
   }
 
   .bz-history .bz-h {
+    text-transform: uppercase;
     font-family: var(--font-label);
     font-size: 10px;
     letter-spacing: 0.1em;

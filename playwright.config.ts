@@ -53,7 +53,9 @@ export default defineConfig({
       },
     },
   ],
-  webServer: {
+  // PW_NO_SERVER=1 uses a server you started yourself (e2e/chain.spec.ts runs against one
+  // built for a local validator, see docs/bezel/devnet.md)
+  webServer: process.env.PW_NO_SERVER ? undefined : {
     command: `env ${APP_ENV} npx next build && env ${APP_ENV} npx next start -H 127.0.0.1 -p ${PORT}`,
     url: BASE_URL,
     reuseExistingServer: false,

@@ -25,9 +25,7 @@ export function SeatList({ pool, members, payments, me }: { pool: FetchedPool; m
             ? { text: m.hasWon ? `Missed a payment · took round ${m.wonRound}` : "Missed a payment", tone: "signal" as const }
             : m.hasWon
               ? { text: `Took round ${m.wonRound}`, tone: "gold" as const }
-              : pool.status === "pending" && pool.stakeEnabled !== false && !m.stakeDeposited
-                ? { text: "Stake pending", tone: undefined }
-                : null;
+              : null;
         return (
           <li key={m.id} className="grid h-[54px] grid-cols-[30px_minmax(0,1fr)_auto] items-center gap-3">
             <span className="font-label text-[10px] text-muted-foreground">{pad(i + 1)}</span>
@@ -60,7 +58,7 @@ export function SeatList({ pool, members, payments, me }: { pool: FetchedPool; m
       })}
       {Array.from({ length: open }, (_, k) => (
         <li key={`open-${k}`} className="grid h-[54px] grid-cols-[30px_minmax(0,1fr)_auto] items-center gap-3">
-          <span className="font-label text-[10px] text-quiet">{pad(seats.length + k + 1)}</span>
+          <span className="font-label text-[10px] text-muted-foreground">{pad(seats.length + k + 1)}</span>
           <span className="text-[14px] text-muted-foreground">Open seat</span>
           <span />
         </li>
@@ -94,12 +92,12 @@ export function HistoryGrid({ pool, members, payments, draws, me }: { pool: Fetc
     return "next";
   };
   return (
-    <div className="overflow-x-auto rounded-[14px]">
+    <div className="overflow-x-auto rounded-[14px]" tabIndex={0} role="region" aria-label="Payment history, scrolls sideways">
       <div
         role="table"
         aria-label="Payments by round"
         className="bz-history"
-        style={{ gridTemplateColumns: `100px repeat(${rounds}, minmax(34px, 1fr))`, minWidth: 100 + rounds * 34 }}
+        style={{ gridTemplateColumns: `108px repeat(${rounds}, minmax(34px, 1fr))`, minWidth: 108 + rounds * 34 }}
       >
         <div role="row" className="contents">
           <span role="columnheader" className="bz-h bz-seat">

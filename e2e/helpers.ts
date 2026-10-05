@@ -126,6 +126,10 @@ export interface MockScenario {
   slot?: number;
   /** The connected wallet's balance. Default 10 SOL. */
   walletLamports?: number;
+  /** The vault's balance. Default: every deposited stake plus this round's payments. */
+  vaultLamports?: number;
+  /** Sent transactions land but fail (confirmation carries an error). */
+  sendFails?: boolean;
 }
 
 const pda = (seeds: (Buffer | Uint8Array)[]) =>
@@ -171,62 +175,75 @@ async function encodeMockPool(scenario: MockScenario): Promise<Buffer> {
  * payments). Accounts are Borsh-encoded from the app's IDL and live at their real PDAs;
  * getProgramAccounts applies memcmp filters the way an RPC node does.
  */
-export async function mockRpcWithPool(page: Page, scenario: MockScenario = {}) {
+export async function mockRpcWithPool(page: Page, initial: MockScenario = {}) {
   const accounts = new Map<string, Buffer>();
-  accounts.set(MOCK_POOL.address.toBase58(), await encodeMockPool(scenario));
-  const round = scenario.status === "Active" ? (scenario.currentRound ?? 1) : 0;
-  for (const [i, m] of (scenario.members ?? []).entries()) {
-    const address = pda([Buffer.from("member"), MOCK_POOL.address.toBuffer(), m.wallet.toBuffer()]);
-    accounts.set(
-      address.toBase58(),
-      await coder.encode("Member", {
-        pool: MOCK_POOL.address,
-        wallet: m.wallet,
-        has_won: m.hasWon ?? false,
-        won_round: m.hasWon ? 1 : 0,
-        stake_deposited: m.stakeDeposited ?? false,
-        stake_amount: new BN(m.stakeDeposited ? MOCK_POOL.lamportsPerRound : 0),
-        payments_made: 0,
-        joined_at: new BN(1_750_000_000 + i),
-        position: i + 1,
-        bump: 255,
-        in_default: m.inDefault ?? m.inGracePeriod ?? false,
-        in_grace_period: m.inGracePeriod ?? false,
-        grace_deadline: new BN(m.inGracePeriod ? Math.floor(Date.now() / 1000) + (m.graceEndsIn ?? 86_400) : 0),
-        is_kicked: m.isKicked ?? false,
-        missed_rounds: m.missedRounds ?? (m.inGracePeriod || m.isKicked ? 1 : 0),
-      })
-    );
-  }
-  for (const wallet of scenario.paid ?? []) {
-    const address = pda([
-      Buffer.from("payment"),
-      MOCK_POOL.address.toBuffer(),
-      wallet.toBuffer(),
-      Buffer.from([round]),
-    ]);
-    accounts.set(
-      address.toBase58(),
-      await coder.encode("Payment", {
-        pool: MOCK_POOL.address,
-        member: wallet,
-        round,
-        amount: new BN(MOCK_POOL.lamportsPerRound),
-        paid_at: new BN(1_750_000_100),
-        bump: 255,
-      })
-    );
-  }
-
   // SlotHashes holds the committed slot's hash, so a half-done draw can be finished.
   const sysvars = new Map<string, Buffer>();
-  if (scenario.committedSlot !== undefined) {
-    const slotHashes = Buffer.alloc(8 + 40);
-    slotHashes.writeBigUInt64LE(BigInt(1), 0);
-    slotHashes.writeBigUInt64LE(BigInt(scenario.committedSlot), 8);
-    createHash("sha256").update("slot").digest().copy(slotHashes, 16);
-    sysvars.set("SysvarS1otHashes111111111111111111111111111", slotHashes);
-  }
+  let scenario = initial;
+  const vault = pda([Buffer.from("vault"), MOCK_POOL.address.toBuffer()]).toBase58();
+  // Rebuilt by update(): a test can move the chain on while the page holds old data.
+  const build = async (next: MockScenario) => {
+    scenario = next;
+    accounts.clear();
+    sysvars.clear();
+    accounts.set(MOCK_POOL.address.toBase58(), await encodeMockPool(scenario));
+    const round = scenario.status === "Active" ? (scenario.currentRound ?? 1) : 0;
+    for (const [i, m] of (scenario.members ?? []).entries()) {
+      const address = pda([Buffer.from("member"), MOCK_POOL.address.toBuffer(), m.wallet.toBuffer()]);
+      accounts.set(
+        address.toBase58(),
+        await coder.encode("Member", {
+          pool: MOCK_POOL.address,
+          wallet: m.wallet,
+          has_won: m.hasWon ?? false,
+          won_round: m.hasWon ? 1 : 0,
+          stake_deposited: m.stakeDeposited ?? false,
+          stake_amount: new BN(m.stakeDeposited ? MOCK_POOL.lamportsPerRound : 0),
+          payments_made: 0,
+          joined_at: new BN(1_750_000_000 + i),
+          position: i + 1,
+          bump: 255,
+          in_default: m.inDefault ?? m.inGracePeriod ?? false,
+          in_grace_period: m.inGracePeriod ?? false,
+          grace_deadline: new BN(m.inGracePeriod ? Math.floor(Date.now() / 1000) + (m.graceEndsIn ?? 86_400) : 0),
+          is_kicked: m.isKicked ?? false,
+          missed_rounds: m.missedRounds ?? (m.inGracePeriod || m.isKicked ? 1 : 0),
+        })
+      );
+    }
+    for (const wallet of scenario.paid ?? []) {
+      const address = pda([
+        Buffer.from("payment"),
+        MOCK_POOL.address.toBuffer(),
+        wallet.toBuffer(),
+        Buffer.from([round]),
+      ]);
+      accounts.set(
+        address.toBase58(),
+        await coder.encode("Payment", {
+          pool: MOCK_POOL.address,
+          member: wallet,
+          round,
+          amount: new BN(MOCK_POOL.lamportsPerRound),
+          paid_at: new BN(1_750_000_100),
+          bump: 255,
+        })
+      );
+    }
+
+    if (scenario.committedSlot !== undefined) {
+      const slotHashes = Buffer.alloc(8 + 40);
+      slotHashes.writeBigUInt64LE(BigInt(1), 0);
+      slotHashes.writeBigUInt64LE(BigInt(scenario.committedSlot), 8);
+      createHash("sha256").update("slot").digest().copy(slotHashes, 16);
+      sysvars.set("SysvarS1otHashes111111111111111111111111111", slotHashes);
+    }
+  };
+  await build(initial);
+  const vaultLamports = () =>
+    scenario.vaultLamports ??
+    MOCK_POOL.lamportsPerRound *
+      ((scenario.members ?? []).filter((m) => m.stakeDeposited).length + (scenario.paid ?? []).length);
 
   const toAccount = (data: Buffer) => ({
     data: [data.toString("base64"), "base64"],
@@ -261,7 +278,12 @@ export async function mockRpcWithPool(page: Page, scenario: MockScenario = {}) {
       case "getBalance":
         return {
           context,
-          value: params[0] === MOCK_WALLET.address ? (scenario.walletLamports ?? 10_000_000_000) : 0,
+          value:
+            params[0] === MOCK_WALLET.address
+              ? (scenario.walletLamports ?? 10_000_000_000)
+              : params[0] === vault
+                ? vaultLamports()
+                : 0,
         };
       case "getSlot":
         return scenario.slot ?? 1000;
@@ -286,7 +308,7 @@ export async function mockRpcWithPool(page: Page, scenario: MockScenario = {}) {
           value: (params[0] as string[]).map(() => ({
             slot: 1,
             confirmations: null,
-            err: null,
+            err: scenario.sendFails ? failure : null,
             confirmationStatus: "confirmed",
           })),
         };
@@ -300,6 +322,7 @@ export async function mockRpcWithPool(page: Page, scenario: MockScenario = {}) {
     }
   };
   let txLookups = 0;
+  const failure = { InstructionError: [0, { Custom: 6000 }] };
 
   // Subscriptions (confirmTransaction's signatureSubscribe) resolve immediately.
   await page.routeWebSocket(
@@ -319,7 +342,7 @@ export async function mockRpcWithPool(page: Page, scenario: MockScenario = {}) {
             JSON.stringify({
               jsonrpc: "2.0",
               method: "signatureNotification",
-              params: { subscription, result: { context: { slot: 1 }, value: { err: null } } },
+              params: { subscription, result: { context: { slot: 1 }, value: { err: scenario.sendFails ? failure : null } } },
             })
           );
         }
@@ -339,6 +362,7 @@ export async function mockRpcWithPool(page: Page, scenario: MockScenario = {}) {
       body: JSON.stringify(Array.isArray(body) ? body.map(reply) : reply(body)),
     });
   });
+  return { update: build };
 }
 
 // ---------------------------------------------------------------------------

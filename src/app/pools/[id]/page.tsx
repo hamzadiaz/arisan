@@ -1,6 +1,6 @@
 "use client";
 
-import { use, useCallback, useEffect, useState } from "react";
+import { use, useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { PublicKey } from "@solana/web3.js";
 import { useConnection, useWallet } from "@solana/wallet-adapter-react";
@@ -8,7 +8,7 @@ import { AppShell, StatusPill } from "@/components/mobile/app-shell";
 import { ConnectWalletButton } from "@/components/mobile/wallet-button";
 import { Dial } from "@/components/bezel/dial";
 import { Icon } from "@/components/bezel/icons";
-import { Button, EmptyState, Label, Note, SkeletonDial, SubDial } from "@/components/bezel/kit";
+import { Button, EmptyState, Label, LowFunds, Note, SkeletonDial, SubDial } from "@/components/bezel/kit";
 import { HistoryGrid, LastDraw, SeatList } from "@/components/bezel/circle-parts";
 import { EMPTY_DIAL, dialFromPool } from "@/components/bezel/dial-spec";
 import { DRAW_ERROR, parsePublicKey, useSolanaPoolActions, useSolanaPoolData } from "@/hooks/use-solana-program";
@@ -26,7 +26,10 @@ interface PoolData {
   draws: FetchedDraw[];
 }
 
-type TxResult = { success: boolean; signature?: string; error?: string; committed?: boolean };
+type TxResult = { success: boolean; signature?: string; error?: string; committed?: boolean; stage?: "committed" | "drawn" };
+
+/** Fees, a Payment or Draw account's rent, and a possible vault top-up */
+const FEE_MARGIN = 0.003;
 
 function plainError(message?: string) {
   return message || "Transaction failed";
@@ -34,9 +37,12 @@ function plainError(message?: string) {
 
 function drawError(message?: string, committed?: boolean) {
   if (message === DRAW_ERROR.alreadyDrawn) return "This round was already drawn.";
+  if (message === DRAW_ERROR.alreadyStarted) return "Someone already started this draw. Finish it now.";
+  if (message === DRAW_ERROR.roundMoved) return "Your draw started on the next round. Finish it within 3 minutes or the circle locks.";
   if (message === DRAW_ERROR.noWinner) return "No seat can win this round.";
-  if (message === DRAW_ERROR.expired) return "The draw wasn’t finished in time. This round is locked on-chain.";
-  if (committed) return "The draw is half done. Tap Finish the draw within 3 minutes.";
+  if (message === DRAW_ERROR.vaultShort) return "The vault can’t cover this pot without spending stakes.";
+  if (message === DRAW_ERROR.expired) return "The draw wasn’t finished within 3 minutes. This circle is locked until the program is fixed.";
+  if (committed) return "The draw is started. Tap Finish the draw within 3 minutes.";
   if (message === DRAW_ERROR.notReady) return "The chain hasn’t caught up yet. Try again.";
   return plainError(message);
 }
@@ -64,6 +70,12 @@ export default function PoolPage({ params }: { params: Promise<{ id: string }> }
   const [working, setWorking] = useState(false);
   const [drawing, setDrawing] = useState(false);
   const [confirmLeave, setConfirmLeave] = useState(false);
+  const stayButton = useRef<HTMLButtonElement>(null);
+  const leaveTrigger = useRef<HTMLButtonElement>(null);
+  // Keyboard focus follows the inline confirm: onto Stay when it opens, back to the trigger after
+  useEffect(() => {
+    if (confirmLeave) stayButton.current?.focus();
+  }, [confirmLeave]);
   // The round this page last drew: never offered again, even before the reload lands
   const [drawnRound, setDrawnRound] = useState<number | null>(null);
   const [now, setNow] = useState(() => Date.now());
@@ -218,7 +230,7 @@ export default function PoolPage({ params }: { params: Promise<{ id: string }> }
       : next;
   const drawIn = timeUntil(pool.nextDrawDate, now);
   const poolKey = new PublicKey(pool.onChainAddress);
-  const dial = dialFromPool(pool, members, payments, draws, me);
+  const dial = dialFromPool(pool, members, payments, draws, me, now);
   const amount = (n: number) => formatAmount(n, pool.currency);
   const expired = f.committed && slot !== null && slot > pool.randomnessSlot + SLOT_HASH_WINDOW;
   const busy = actions.isLoading || working;
@@ -226,7 +238,7 @@ export default function PoolPage({ params }: { params: Promise<{ id: string }> }
   const run = async (
     start: () => string | number,
     tx: () => Promise<TxResult>,
-    done: (signature: string) => void,
+    done: (signature: string, result: TxResult) => void,
     explain: (message?: string, committed?: boolean) => string
   ) => {
     setWorking(true);
@@ -236,7 +248,7 @@ export default function PoolPage({ params }: { params: Promise<{ id: string }> }
       error: error instanceof Error ? error.message : undefined,
     }));
     dismissToast(toastId);
-    if (result.success) done(result.signature!);
+    if (result.success) done(result.signature!, result);
     else txErrorToast(explain(result.error, result.committed));
     // Reload on failure too: a half-done draw or a round someone else drew changes the action
     await load();
@@ -258,6 +270,13 @@ export default function PoolPage({ params }: { params: Promise<{ id: string }> }
       (sig) => poolToasts.stakeDeposited(sig, f.stakeEach, pool.currency),
       plainError
     );
+  const restakeAndPay = () =>
+    run(
+      poolToasts.depositingStake,
+      () => actions.depositStake({ poolAddress: poolKey, payRound: pool.currentRound }),
+      (sig) => poolToasts.paymentMade(sig, pool.monthlyAmount, pool.currency, pool.currentRound),
+      plainError
+    );
   const start = () => run(poolToasts.startingPool, () => actions.startPool({ poolAddress: poolKey }), poolToasts.poolStarted, plainError);
   const claim = (d: FetchedDraw) =>
     run(
@@ -266,17 +285,18 @@ export default function PoolPage({ params }: { params: Promise<{ id: string }> }
       (sig) => poolToasts.winningsClaimed(sig, d.amount, pool.currency),
       plainError
     );
-  const draw = async (finishing: boolean) => {
+  // One step per tap: Draw now commits, Finish the draw pays the winner.
+  const draw = async () => {
     const round = pool.currentRound;
     setDrawing(true);
     await run(
-      finishing ? poolToasts.finishing : poolToasts.drawing,
+      f.committed ? poolToasts.finishing : poolToasts.drawing,
       async () => {
         const result = await actions.executeDraw({ poolAddress: poolKey, round });
-        if (result.success || result.error === DRAW_ERROR.alreadyDrawn) setDrawnRound(round);
+        if ((result.success && result.stage === "drawn") || result.error === DRAW_ERROR.alreadyDrawn) setDrawnRound(round);
         return result;
       },
-      (sig) => poolToasts.drawn(sig, round),
+      (sig, result) => (result.stage === "drawn" ? poolToasts.drawn(sig, round) : poolToasts.drawStarted(sig)),
       drawError
     );
     setDrawing(false);
@@ -290,7 +310,7 @@ export default function PoolPage({ params }: { params: Promise<{ id: string }> }
           round: pool.currentRound,
           wallets: f.toMark.map((m) => new PublicKey(m.walletAddress)),
         }),
-      (sig) => poolToasts.marked(sig, f.toMark.length),
+      (sig) => poolToasts.marked(sig, f.toMark.length, f.toKick.length),
       (m) => (m === DRAW_ERROR.alreadyDrawn ? "This round has moved on." : plainError(m))
     );
   const leave = () =>
@@ -299,11 +319,13 @@ export default function PoolPage({ params }: { params: Promise<{ id: string }> }
       () => actions.leavePool({ poolAddress: poolKey }),
       (sig) => {
         setConfirmLeave(false);
-        poolToasts.left(sig);
+        poolToasts.left(sig, !!myMember?.stakeDeposited && (myMember?.stakeAmount ?? 0) > 0);
       },
       plainError
     );
-  const rejoin = () => run(poolToasts.rejoining, () => actions.rejoinPool({ poolAddress: poolKey }), poolToasts.rejoined, plainError);
+  // A removed member hasn't paid this round either: rejoin and pay in one transaction
+  const rejoin = () =>
+    run(poolToasts.rejoining, () => actions.rejoinPool({ poolAddress: poolKey, payRound: pool.currentRound }), poolToasts.rejoined, plainError);
   const refund = () =>
     run(
       poolToasts.refunding,
@@ -323,17 +345,9 @@ export default function PoolPage({ params }: { params: Promise<{ id: string }> }
       plainError
     );
 
-  // Money-moving buttons check the wallet first; fees need a little SOL on top.
-  const short = (cost: number) => balance.sol !== null && balance.sol < cost + 0.001;
-  const lowFunds = (cost: number) =>
-    short(cost) ? (
-      <>
-        Not enough SOL.{" "}
-        <a href="https://faucet.solana.com" target="_blank" rel="noopener noreferrer" className="bz-link">
-          Get devnet SOL
-        </a>
-      </>
-    ) : null;
+  // Money-moving buttons check the wallet first: the amount plus fees and account rent.
+  const short = (cost: number) => balance.sol !== null && balance.sol < cost + FEE_MARGIN;
+  const lowFunds = (cost: number) => (short(cost) ? <LowFunds /> : null);
 
   let note: React.ReactNode = null;
   let primary: React.ReactNode = null;
@@ -370,7 +384,7 @@ export default function PoolPage({ params }: { params: Promise<{ id: string }> }
     case "start":
       primary = (
         <Button onClick={start} disabled={!action.ready} busy={busy}>
-          {!f.full ? `Waiting for seats (${f.joined}/${pool.maxMembers})` : f.staked < f.joined ? `Waiting for stakes (${f.staked}/${f.joined})` : "Start circle"}
+          Start circle
         </Button>
       );
       hint = !f.full
@@ -383,7 +397,9 @@ export default function PoolPage({ params }: { params: Promise<{ id: string }> }
       primary = (
         <button disabled className="bz-button bz-button-done">
           <Icon name="check" className="size-[18px]" />
-          {f.full ? "Waiting for the host to start" : `Waiting for seats (${f.joined}/${pool.maxMembers})`}
+          {f.full
+            ? "You’re in · waiting for the host"
+            : `${f.stakePool ? "Staked" : "You’re in"} · ${plural(pool.maxMembers - f.joined, "seat", "seats")} open`}
         </button>
       );
       break;
@@ -391,45 +407,61 @@ export default function PoolPage({ params }: { params: Promise<{ id: string }> }
       if (expired) {
         note = (
           <Note tone="signal" icon="alert" className="mt-4">
-            <b>This round&rsquo;s draw expired.</b> It was started but not finished within 3 minutes, and the program can&rsquo;t restart it.
+            <b>This circle is locked.</b> Its draw wasn&rsquo;t finished within 3 minutes: no more rounds or refunds until the program is fixed.
           </Note>
         );
       } else {
         primary = (
-          <Button icon="draw" onClick={() => draw(true)} busy={busy || drawing} busyLabel="Drawing…">
+          <Button icon="draw" onClick={draw} busy={busy || drawing} busyLabel="Finishing…" disabled={short(0)}>
             Finish the draw
           </Button>
         );
-        hint = "One approval left. Finish within 3 minutes.";
+        hint =
+          lowFunds(0) ??
+          (f.uncovered > 0
+            ? "Not every seat has paid, so the pot uses stakes. Finish within 3 minutes or the circle locks."
+            : "Last step. Finish within 3 minutes or the circle locks.");
       }
       break;
-    case "rejoin":
+    case "finishLater":
+      note = (
+        <Note icon="info" className="mt-4">
+          <b>The host started this draw early.</b> Only they can finish it before {when(pool.nextDrawDate)}. If nobody finishes it within 3 minutes, the circle locks.
+        </Note>
+      );
+      break;
+    case "rejoin": {
+      const total = f.rejoinCost + pool.monthlyAmount;
       note = (
         <Note tone="signal" icon="alert" className="mt-4">
-          <b>You were removed for missing a payment.</b> Rejoin for {amount(f.rejoinCost)}: a fresh stake plus the rounds you missed.
+          <b>You were removed for missing a payment.</b> Rejoin with a fresh stake,{" "}
+          {(myMember?.missedRounds ?? 1) > 1 ? `the ${myMember?.missedRounds} rounds you missed` : "the round you missed"} and this round&rsquo;s payment.
         </Note>
       );
       primary = (
-        <Button onClick={rejoin} busy={busy} disabled={short(f.rejoinCost)}>
-          Rejoin · {amount(f.rejoinCost)}
+        <Button onClick={rejoin} busy={busy} disabled={short(total)}>
+          Rejoin and pay · {amount(total)}
         </Button>
       );
-      hint = lowFunds(f.rejoinCost);
+      hint = lowFunds(total);
       break;
-    case "restake":
+    }
+    case "restake": {
+      const total = f.stakeEach + pool.monthlyAmount;
       note = (
         <Note tone="signal" icon="alert" className="mt-4">
-          <b>You missed round {pool.currentRound}.</b> Restake {amount(f.stakeEach)}
+          <b>You missed a round.</b> Restake {amount(f.stakeEach)} and pay this round
           {myMember?.graceDeadline ? ` by ${when(myMember.graceDeadline)}` : ""} to keep your seat.
         </Note>
       );
       primary = (
-        <Button icon="lock" onClick={stake} busy={busy} disabled={short(f.stakeEach)}>
-          Restake · {amount(f.stakeEach)}
+        <Button icon="lock" onClick={restakeAndPay} busy={busy} disabled={short(total)}>
+          Restake and pay · {amount(total)}
         </Button>
       );
-      hint = lowFunds(f.stakeEach);
+      hint = lowFunds(total);
       break;
+    }
     case "blocked":
       primary = (
         <Button disabled tone="quiet">
@@ -446,6 +478,12 @@ export default function PoolPage({ params }: { params: Promise<{ id: string }> }
             {myMember.graceDeadline ? ` by ${when(myMember.graceDeadline)}` : ""} to keep your seat.
           </Note>
         );
+      } else if (f.committed) {
+        note = (
+          <Note tone="gold" icon="draw" className="mt-4">
+            <b>A draw has started.</b> Pay first so your share is in the pot.
+          </Note>
+        );
       }
       primary = (
         <Button onClick={pay} busy={busy} disabled={short(pool.monthlyAmount)}>
@@ -454,21 +492,35 @@ export default function PoolPage({ params }: { params: Promise<{ id: string }> }
       );
       hint = lowFunds(pool.monthlyAmount);
       break;
-    case "mark":
+    case "mark": {
+      const all = f.toMark.length;
+      const kicks = f.toKick.length;
+      // A removed seat that hasn't won is still owed a round: total_rounds never shrinks
+      const owedTurn = f.toKick.some((m) => !m.hasWon);
       primary = (
         <Button tone="ghost" icon="alert" onClick={mark} busy={busy}>
-          Mark {f.toMark.length === 1 ? "missed payment" : `${f.toMark.length} missed payments`}
+          {kicks === all
+            ? `Remove ${all === 1 ? "1 seat" : `${all} seats`}`
+            : `Mark ${all === 1 ? "missed payment" : `${all} missed payments`}`}
         </Button>
       );
-      hint = f.stakePool ? "Their stake covers the pot. Then the draw opens." : "Starts their 48-hour grace.";
+      hint =
+        kicks > 0
+          ? owedTurn
+            ? "Their 48-hour grace is over. Removed seats that haven’t won keep the circle from finishing until they rejoin."
+            : "Their 48-hour grace is over: this removes them."
+          : f.stakePool
+            ? "Their stake covers the pot. Then the draw opens."
+            : "Starts their 48-hour grace.";
       break;
+    }
     case "draw":
       primary = (
-        <Button icon="draw" onClick={() => draw(false)} busy={busy || drawing} busyLabel="Drawing… approve twice">
+        <Button icon="draw" onClick={draw} busy={busy || drawing} busyLabel="Starting the draw…" disabled={short(0)}>
           Draw now
         </Button>
       );
-      hint = "Two approvals. Picks a seat that hasn’t won.";
+      hint = lowFunds(0) ?? "Two steps: start, then finish within 3 minutes.";
       break;
     case "paid":
       primary = (
@@ -491,21 +543,20 @@ export default function PoolPage({ params }: { params: Promise<{ id: string }> }
       break;
     case "refund":
       primary = (
-        <Button icon="lock" onClick={refund} busy={busy}>
+        <Button icon="coin" onClick={refund} busy={busy}>
           Get {amount(myMember!.stakeAmount)} back
         </Button>
       );
       break;
     case "returnAll":
       primary = (
-        <Button tone="ghost" icon="lock" onClick={returnAll} busy={busy}>
+        <Button tone="ghost" icon="coin" onClick={returnAll} busy={busy}>
           Return {f.stakesLeft.length === 1 ? "the last stake" : `${f.stakesLeft.length} stakes`}
         </Button>
       );
-      hint = "Sends each stake back to its owner. You pay the fee.";
+      hint = f.stakesLeft.length === 1 ? "Sends it back to its owner. You pay the fee." : "Sends each stake back to its owner. You pay the fee.";
       break;
     case "complete":
-      hint = "Complete.";
       break;
   }
 
@@ -513,12 +564,20 @@ export default function PoolPage({ params }: { params: Promise<{ id: string }> }
   if (pool.status === "pending" && myMember && connected) {
     secondary = confirmLeave ? (
       <div className="mt-3 rounded-[14px] bg-card p-3.5 text-[14px] leading-snug shadow-[inset_0_0_0_1px_var(--border)]">
-        <p>
-          <b>Leave this circle?</b>{" "}
+        <p className="font-semibold">Leave this circle?</p>
+        <p className="mt-0.5 text-muted-foreground">
           {myMember.stakeDeposited && myMember.stakeAmount > 0 ? `Your ${amount(myMember.stakeAmount)} stake comes back to you.` : "Your seat opens up for someone else."}
         </p>
         <div className="mt-2 grid grid-cols-2 gap-2">
-          <Button tone="ghost" onClick={() => setConfirmLeave(false)} disabled={busy}>
+          <Button
+            ref={stayButton}
+            tone="ghost"
+            onClick={() => {
+              setConfirmLeave(false);
+              setTimeout(() => leaveTrigger.current?.focus(), 0);
+            }}
+            disabled={busy}
+          >
             Stay
           </Button>
           <Button tone="quiet" className="text-signal" onClick={leave} busy={busy} busyLabel="Leaving…">
@@ -527,7 +586,7 @@ export default function PoolPage({ params }: { params: Promise<{ id: string }> }
         </div>
       </div>
     ) : (
-      <button onClick={() => setConfirmLeave(true)} className="bz-link mx-auto mt-3 flex text-[13.5px] text-muted-foreground">
+      <button ref={leaveTrigger} onClick={() => setConfirmLeave(true)} className="bz-link bz-hit mx-auto mt-2 flex min-h-11 items-center text-[13.5px] text-muted-foreground">
         Leave circle
       </button>
     );
@@ -535,27 +594,33 @@ export default function PoolPage({ params }: { params: Promise<{ id: string }> }
   // After the circle completes, anyone's leftover stakes can go back in one tap.
   if (action.kind === "refund" && f.stakesLeft.length > 0) {
     secondary = (
-      <button onClick={returnAll} disabled={busy} className="bz-link mx-auto mt-3 flex text-[13.5px] text-muted-foreground">
-        Return everyone&rsquo;s stake ({f.stakesLeft.length})
+      <button onClick={returnAll} disabled={busy} className="bz-link bz-hit mx-auto mt-2 flex min-h-11 items-center text-[13.5px] text-muted-foreground">
+        {f.stakesLeft.length === 1 ? "Return the last stake" : `Return ${f.stakesLeft.length} stakes`}
       </button>
     );
   }
 
   const [potNum, potUnit] = split(amount(f.pot));
   const lastDraw = draws.length ? draws.reduce((a, b) => (b.round > a.round ? b : a)) : null;
-  const drawValue = f.committed ? (expired ? "Locked" : "Now") : drawIn ?? (f.canDraw ? "Ready" : "Due");
+  const drawValue = f.committed ? (expired ? "Locked" : "Finish") : drawIn ?? (f.canDraw ? "Ready" : "Due");
   const drawTone = f.committed ? (expired ? "signal" : "ready") : drawIn ? undefined : f.canDraw ? "ready" : "signal";
 
   return (
     <AppShell title={pool.name} back>
+      {loadFailed && (
+        <Note tone="signal" icon="offline" className="mb-3 mt-1">
+          Can&rsquo;t reach Solana. Showing the last data.
+        </Note>
+      )}
+
       <Dial spec={dial} size={280} view="top" numerals drawing={drawing} label={`${pool.name}: ${members.length} of ${pool.maxMembers} seats`} />
 
-      <div className="mt-1 flex items-center justify-center gap-2">
+      <div className="mt-3 flex items-center justify-center gap-2">
         <Label>
           {pool.status === "active"
             ? `Round ${pool.currentRound} of ${pool.durationMonths}`
             : pool.status === "pending"
-              ? `${f.joined} of ${pool.maxMembers} joined`
+              ? `${amount(pool.monthlyAmount)} a round · ${plural(pool.durationMonths, "round", "rounds")}`
               : "Complete"}
         </Label>
         <button onClick={refresh} className="bz-hit flex size-7 items-center justify-center rounded-full text-muted-foreground active:bg-secondary" aria-label="Refresh">

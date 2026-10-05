@@ -114,7 +114,7 @@ function studioEnv(renderer: WebGLRenderer, light: boolean) {
   panel(9, 3.5, 0xfff3dc, light ? 5 : 9, [0, 5.5, -6.5]);
   panel(1.4, 8, 0xfff0da, light ? 5 : 8, [-7, 2.5, 2.5]);
   panel(1.1, 8, 0xe2f1ff, light ? 3 : 5, [7, 2, -2]);
-  panel(6, 1.6, 0x2ad497, light ? 1.2 : 3.2, [0, -1.2, -7]);
+  panel(6, 1.6, 0x17a37a, light ? 0.6 : 0.7, [0, -1.2, -7]);
   panel(4, 3, 0xffe7c8, light ? 1.6 : 2.6, [2.5, 3, 7]);
   const pm = new PMREMGenerator(renderer);
   const tex = pm.fromScene(scene, 0.03).texture;
@@ -298,6 +298,8 @@ class DialEngine {
   private pending: DialSpec | null = null;
   private owner: DialOwner | null = null;
   private themeApplied: Theme | null = null;
+  /** The shader compile in flight: a lost context must not dispose the renderer under it */
+  private compiling: Promise<void> | null = null;
   private spec: DialSpec = { seats: 6, mode: "pending" };
   private opts: AttachOptions = { theme: "dark", view: "hero", background: "#0a0f0d", reducedMotion: false };
   private host: HTMLElement | null = null;
@@ -305,7 +307,15 @@ class DialEngine {
   private envs = new Map<Theme, Texture>();
   private geo: Record<string, BufferGeometry> = {};
   private mats: Record<string, Material> = {};
-  private themed: { back: MeshStandardMaterial; glass: MeshPhysicalMaterial; shadow: MeshBasicMaterial; gold: MeshStandardMaterial[] };
+  private themed: {
+    back: MeshStandardMaterial;
+    glass: MeshPhysicalMaterial;
+    shadow: MeshBasicMaterial;
+    gold: MeshStandardMaterial[];
+    relief: MeshStandardMaterial;
+  };
+  private backMesh!: Mesh;
+  private caseEmpty!: MeshBasicMaterial;
   private glowTex: Texture;
   private lost = false;
 
@@ -328,18 +338,24 @@ class DialEngine {
       this.owner = null;
       if (this.host && this.canvas.parentElement === this.host) this.host.removeChild(this.canvas);
       this.host = null;
-      try {
-        this.renderer.dispose();
-      } catch {
-        /* already gone */
-      }
+      const dispose = () => {
+        try {
+          this.renderer.dispose();
+        } catch {
+          /* already gone */
+        }
+      };
+      if (this.compiling) this.compiling.finally(dispose);
+      else dispose();
       owner?.onLost?.();
     });
 
     const hm = hammeredTextures();
-    const gold = new Color("#e2bd62");
-    const field = goldMat({ color: gold, rough: 0.58, roughMap: hm.rough, bump: hm.bump, bumpScale: 1.2 });
+    const gold = new Color("#d9bc76");
+    const field = goldMat({ color: gold, rough: 0.58, roughMap: hm.rough, bump: hm.bump, bumpScale: 0.8 });
     const polish = goldMat({ color: gold, rough: 0.16 });
+    // The maze stays legible on pale light-theme gold with a deeper tint of its own
+    const relief = goldMat({ color: gold, rough: 0.16 });
     const edge = goldMat({ color: new Color("#c99a3e"), rough: 0.3, bump: reedTexture(), bumpScale: 1.4 });
     const H = 0.07;
     const face = new CircleGeometry(0.86, 160);
@@ -359,8 +375,8 @@ class DialEngine {
     ].map(([x, y]) => new Vector2(x, y));
     const rimBottom = rimTop.map((v) => new Vector2(v.x, -v.y)).reverse();
     const emblem = emblemGeometry(H);
-    const frontEmblem = new Mesh(emblem, polish);
-    const backEmblem = new Mesh(emblem, polish);
+    const frontEmblem = new Mesh(emblem, relief);
+    const backEmblem = new Mesh(emblem, relief);
     backEmblem.rotation.x = Math.PI;
     const gemPts = [
       [0, -0.034],
@@ -392,14 +408,18 @@ class DialEngine {
       transmission: 1,
       thickness: 0.6,
       ior: 1.56,
-      attenuationColor: new Color("#2bc58c"),
+      attenuationColor: new Color("#1fae7c"),
       attenuationDistance: 0.8,
       specularIntensity: 1,
       envMapIntensity: 0.9,
-      dispersion: 0.25,
+      // A little fire at the edges; more splits the rim into lime
+      dispersion: 0.04,
     });
     const back = new MeshStandardMaterial({ color: "#0c1613", roughness: 0.35, metalness: 0.3 });
     const backMesh = new Mesh(new CylinderGeometry(1.32, 1.32, 0.03, 160), back);
+    this.backMesh = backMesh;
+    // With the coin hidden (empty and error states) the case-back takes the page's tone
+    this.caseEmpty = new MeshBasicMaterial({ color: "#0a0f0d", toneMapped: false });
     backMesh.position.y = -0.2;
     const shadow = new MeshBasicMaterial({
       map: radialTexture([[0, "rgba(0,0,0,0.75)"], [0.55, "rgba(0,0,0,0.35)"], [1, "rgba(0,0,0,0)"]], 256),
@@ -424,7 +444,7 @@ class DialEngine {
     const key = new DirectionalLight(0xfff1de, 1.1);
     key.position.set(-2, 5, 3);
     this.scene.add(key);
-    this.themed = { back, glass, shadow, gold: [field, polish] };
+    this.themed = { back, glass, shadow, gold: [field, polish], relief };
 
     // Marks sit on the glass as flush points. Transparent materials stay out of the glass's
     // refraction pass, so a mark never shows twice.
@@ -434,17 +454,19 @@ class DialEngine {
       [1, "rgba(255,255,255,0)"],
     ]);
     this.geo = {
-      dome: new SphereGeometry(0.032, 28, 14, 0, TAU, 0, Math.PI / 2),
-      ring: new TorusGeometry(0.03, 0.0062, 8, 40).rotateX(Math.PI / 2),
-      lateRing: new TorusGeometry(0.031, 0.0105, 10, 40).rotateX(Math.PI / 2),
-      wonRing: new TorusGeometry(0.047, 0.0042, 8, 44).rotateX(Math.PI / 2),
-      open: new TorusGeometry(0.034, 0.006, 8, 32).rotateX(Math.PI / 2),
-      you: new TorusGeometry(0.066, 0.0058, 8, 56).rotateX(Math.PI / 2),
-      ripple: new TorusGeometry(0.06, 0.006, 6, 48).rotateX(Math.PI / 2),
+      dome: new SphereGeometry(0.052, 28, 14, 0, TAU, 0, Math.PI / 2),
+      ring: new TorusGeometry(0.05, 0.009, 8, 44).rotateX(Math.PI / 2),
+      lateRing: new TorusGeometry(0.052, 0.015, 10, 44).rotateX(Math.PI / 2),
+      wonRing: new TorusGeometry(0.075, 0.0065, 8, 48).rotateX(Math.PI / 2),
+      open: new TorusGeometry(0.054, 0.009, 8, 40).rotateX(Math.PI / 2),
+      you: new TorusGeometry(0.095, 0.0075, 8, 60).rotateX(Math.PI / 2),
+      ripple: new TorusGeometry(0.09, 0.008, 6, 48).rotateX(Math.PI / 2),
     };
     const flat = (color: Color, opacity = 1) => new MeshBasicMaterial({ color, toneMapped: false, transparent: true, opacity });
     this.mats = {
       taken: flat(new Color("#7b8a83"), 0.95),
+      // A joined, unpaid seat is a dark filled dot inside its ring; open seats stay hollow
+      takenFill: flat(new Color("#0f1714"), 0.95),
       lit: flat(LUME),
       won: goldMat({ color: MARK_GOLD, rough: 0.18, transparent: true }),
       late: flat(SIGNAL),
@@ -488,11 +510,22 @@ class DialEngine {
   /** Compile shaders off the critical path, then draw the first frame. */
   async warm() {
     if (!this.ready) {
-      try {
-        await this.renderer.compileAsync(this.scene, this.camera);
-      } catch {
-        /* compileAsync is an optimisation only */
+      // One hidden mesh per mark material, so a first win or payment doesn't compile mid-animation
+      const warmers = new Group();
+      for (const mat of Object.values(this.mats)) {
+        if (mat instanceof SpriteMaterial) warmers.add(new Sprite(mat));
+        else warmers.add(new Mesh(this.geo.dome, mat));
       }
+      warmers.scale.setScalar(1e-4);
+      this.scene.add(warmers);
+      this.compiling = this.renderer.compileAsync(this.scene, this.camera).then(
+        () => undefined,
+        () => undefined // compileAsync is an optimisation only
+      );
+      await this.compiling;
+      this.compiling = null;
+      this.scene.remove(warmers);
+      if (this.lost) return;
       this.ready = true;
     }
     this.render();
@@ -531,9 +564,11 @@ class DialEngine {
       const gen = this.gen;
       this.queue = this.queue
         .then(() => {
+          // A re-attach owns `pending` now; this link belongs to the old hosting
+          if (gen !== this.gen) return;
           const spec = this.pending;
           this.pending = null;
-          if (spec && gen === this.gen) return this.transition(spec);
+          if (spec) return this.transition(spec);
         })
         .catch(() => undefined);
     }
@@ -581,13 +616,18 @@ class DialEngine {
       this.envs.set(theme, env);
     }
     this.scene.environment = env;
-    this.themed.back.color.set(light ? "#11694a" : "#0c1613");
-    this.themed.glass.attenuationColor.set(light ? "#3fcf98" : "#2bc58c");
-    this.themed.glass.attenuationDistance = light ? 1.6 : 0.8;
+    this.themed.back.color.set(light ? "#dfe8e2" : "#0c1613");
+    this.themed.glass.attenuationColor.set(light ? "#3fcf98" : "#1fae7c");
+    this.themed.glass.attenuationDistance = light ? 2.6 : 0.8;
     this.themed.shadow.opacity = light ? 0.32 : 0.7;
-    for (const m of this.themed.gold) m.color.set(light ? "#dcb65a" : "#e2bd62");
-    (this.mats.taken as MeshBasicMaterial).color.set(light ? "#5b6660" : "#7b8a83");
-    (this.mats.open as MeshBasicMaterial).color.set(light ? "#5b6660" : "#a8b6af");
+    for (const m of this.themed.gold) m.color.set(light ? "#d6c084" : "#d9bc76");
+    this.themed.relief.color.set(light ? "#b98d33" : "#d9bc76");
+    this.caseEmpty.color.set(light ? "#f3f1ea" : "#0a0f0d");
+    (this.mats.taken as MeshBasicMaterial).color.set(light ? "#0a2a1e" : "#7b8a83");
+    (this.mats.takenFill as MeshBasicMaterial).color.set(light ? "#0a2a1e" : "#0f1714");
+    const open = this.mats.open as MeshBasicMaterial;
+    open.color.set(light ? "#f4f2ec" : "#a8b6af");
+    open.opacity = light ? 0.9 : 0.75;
     (this.mats.glow as SpriteMaterial).opacity = light ? 0.35 : 0.7;
     (this.mats.glowLate as SpriteMaterial).opacity = light ? 0.3 : 0.6;
   }
@@ -633,7 +673,8 @@ class DialEngine {
     let last = performance.now();
     const frame = (t: number) => {
       if (!this.looping) return;
-      const dt = Math.min(0.05, (t - last) / 1000);
+      // rAF timestamps can trail performance.now(): never step backwards
+      const dt = Math.min(0.05, Math.max(0, (t - last) / 1000));
       last = t;
       this.step(dt);
       if (this.spinning) this.dial.rotation.y += dt * 2.4;
@@ -703,11 +744,15 @@ class DialEngine {
       g.position.set(R * Math.cos(a), 0.192, R * Math.sin(a));
       const st = markState(s, i);
       if (st === "open") g.add(new Mesh(this.geo.open, this.mats.open));
-      else if (st === "taken") g.add(new Mesh(this.geo.ring, this.mats.taken));
+      else if (st === "taken") {
+        const fill = new Mesh(this.geo.dome, this.mats.takenFill);
+        fill.scale.set(0.82, 0.3, 0.82);
+        g.add(fill, new Mesh(this.geo.ring, this.mats.taken));
+      }
       else if (st === "late") {
         g.add(new Mesh(this.geo.lateRing, this.mats.late));
         const glow = new Sprite(this.mats.glowLate as SpriteMaterial);
-        glow.scale.setScalar(0.12);
+        glow.scale.setScalar(0.2);
         g.add(glow);
       } else {
         const dome = new Mesh(this.geo.dome, this.mats[st]);
@@ -717,7 +762,7 @@ class DialEngine {
         if (st === "won") g.add(new Mesh(this.geo.wonRing, this.mats.won));
         if (st === "lit") {
           const glow = new Sprite(this.mats.glow as SpriteMaterial);
-          glow.scale.setScalar(0.14);
+          glow.scale.setScalar(0.23);
           glow.position.y = 0.012;
           g.add(glow);
         }
@@ -743,6 +788,7 @@ class DialEngine {
       this.dial.add(arc);
     }
     this.coinPivot.visible = s.coin !== false;
+    this.backMesh.material = s.coin === false ? this.caseEmpty : this.themed.back;
     if (grow) this.marks.forEach((m, i) => void this.tween(0.18 + i * 0.012, (k) => m.scale.setScalar(Math.max(0.01, ease.outBack(k)))));
     this.render();
   }
@@ -778,6 +824,8 @@ class DialEngine {
   }
 
   private tick(amount: number) {
+    // A free spin owns the rotation; a tick would snap it back
+    if (this.spinning) return Promise.resolve();
     const base = this.dial.rotation.y;
     return this.tween(0.22, (k) => (this.dial.rotation.y = base + amount * Math.sin(k * Math.PI)));
   }

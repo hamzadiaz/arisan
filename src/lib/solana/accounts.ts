@@ -220,7 +220,9 @@ export async function fetchMember(
     const member = memberAccount as unknown as OnChainMember;
 
     // Get pool currency for proper conversion
-    const poolAccount = await accounts.pool.fetch(poolAddress);
+    const poolAccount = await accounts.pool.fetchNullable(poolAddress);
+    // No pool, no account to read
+    if (!poolAccount) return null;
     const pool = poolAccount as unknown as OnChainPool;
     const currency = getCurrencyString(pool.currency);
 
@@ -271,7 +273,9 @@ export async function fetchPoolMembers(
     ]);
 
     // Get pool currency for proper conversion
-    const poolAccount = await accounts.pool.fetch(poolAddress);
+    const poolAccount = await accounts.pool.fetchNullable(poolAddress);
+    // No pool, nothing to list: the page shows "not found" from its own pool read
+    if (!poolAccount) return [];
     const pool = poolAccount as unknown as OnChainPool;
     const currency = getCurrencyString(pool.currency);
 
@@ -303,8 +307,13 @@ export async function fetchPoolMembers(
       };
     }).sort((a: FetchedMember, b: FetchedMember) => a.position - b.position);
   } catch (error) {
-    console.error("Failed to fetch pool members:", error);
-    return [];
+    // An old-layout account isn't an outage; an unreachable RPC is, and must not read as
+    // "nobody paid" (the screen would offer Pay and Mark transactions that can only fail)
+    if (isDecodeError(error)) {
+      console.warn("Skipping old-format pool members:", error);
+      return [];
+    }
+    throw new ChainUnavailableError(error);
   }
 }
 
@@ -327,7 +336,9 @@ export async function fetchPayment(
     const payment = paymentAccount as unknown as OnChainPayment;
 
     // Get pool currency for proper conversion
-    const poolAccount = await accounts.pool.fetch(poolAddress);
+    const poolAccount = await accounts.pool.fetchNullable(poolAddress);
+    // No pool, no account to read
+    if (!poolAccount) return null;
     const pool = poolAccount as unknown as OnChainPool;
     const currency = getCurrencyString(pool.currency);
 
@@ -370,7 +381,9 @@ export async function fetchPoolPayments(
     ]);
 
     // Get pool currency for proper conversion
-    const poolAccount = await accounts.pool.fetch(poolAddress);
+    const poolAccount = await accounts.pool.fetchNullable(poolAddress);
+    // No pool, nothing to list: the page shows "not found" from its own pool read
+    if (!poolAccount) return [];
     const pool = poolAccount as unknown as OnChainPool;
     const currency = getCurrencyString(pool.currency);
 
@@ -400,8 +413,13 @@ export async function fetchPoolPayments(
 
     return payments.sort((a, b) => b.paidAt!.getTime() - a.paidAt!.getTime());
   } catch (error) {
-    console.error("Failed to fetch pool payments:", error);
-    return [];
+    // An old-layout account isn't an outage; an unreachable RPC is, and must not read as
+    // "nobody paid" (the screen would offer Pay and Mark transactions that can only fail)
+    if (isDecodeError(error)) {
+      console.warn("Skipping old-format pool payments:", error);
+      return [];
+    }
+    throw new ChainUnavailableError(error);
   }
 }
 
@@ -424,7 +442,9 @@ export async function fetchDraw(
     const draw = drawAccount as unknown as OnChainDraw;
 
     // Get pool currency for proper conversion
-    const poolAccount = await accounts.pool.fetch(poolAddress);
+    const poolAccount = await accounts.pool.fetchNullable(poolAddress);
+    // No pool, no account to read
+    if (!poolAccount) return null;
     const pool = poolAccount as unknown as OnChainPool;
     const currency = getCurrencyString(pool.currency);
 
@@ -474,7 +494,9 @@ export async function fetchPoolDraws(
     ]);
 
     // Get pool currency for proper conversion
-    const poolAccount = await accounts.pool.fetch(poolAddress);
+    const poolAccount = await accounts.pool.fetchNullable(poolAddress);
+    // No pool, nothing to list: the page shows "not found" from its own pool read
+    if (!poolAccount) return [];
     const pool = poolAccount as unknown as OnChainPool;
     const currency = getCurrencyString(pool.currency);
 
@@ -500,8 +522,13 @@ export async function fetchPoolDraws(
       })
       .sort((a: FetchedDraw, b: FetchedDraw) => b.round - a.round);
   } catch (error) {
-    console.error("Failed to fetch pool draws:", error);
-    return [];
+    // An old-layout account isn't an outage; an unreachable RPC is, and must not read as
+    // "nobody paid" (the screen would offer Pay and Mark transactions that can only fail)
+    if (isDecodeError(error)) {
+      console.warn("Skipping old-format pool draws:", error);
+      return [];
+    }
+    throw new ChainUnavailableError(error);
   }
 }
 

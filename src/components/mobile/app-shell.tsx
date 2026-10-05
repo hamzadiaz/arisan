@@ -49,7 +49,7 @@ export function AppShell({ title, back, children }: AppShellProps) {
     <div className="mx-auto flex min-h-dvh w-full max-w-[480px] flex-col bg-background">
       <header
         className={cn(
-          "sticky top-0 z-40 bg-background/88 pt-[env(safe-area-inset-top)] backdrop-blur-xl transition-shadow",
+          "sticky top-0 z-40 bg-background/95 pt-[env(safe-area-inset-top)] backdrop-blur-xl transition-shadow",
           scrolled && "shadow-[inset_0_-1px_0_var(--border)]"
         )}
       >
@@ -150,11 +150,11 @@ const STATUS_LABELS: Record<string, string> = {
 // Status reads the same everywhere: a dot whose shape says the state, then the word.
 const STATUS_DOT: Record<string, "paid" | "off" | "won"> = { pending: "off", active: "paid", completed: "won", cancelled: "off" };
 
-export function StatusPill({ status }: { status: string }) {
+export function StatusPill({ status, label }: { status: string; label?: string }) {
   return (
     <span className="bz-status">
       <span aria-hidden="true" className={cn("bz-dot", `bz-dot-${STATUS_DOT[status] ?? "off"}`)} />
-      {STATUS_LABELS[status] ?? status}
+      {label ?? STATUS_LABELS[status] ?? status}
     </span>
   );
 }

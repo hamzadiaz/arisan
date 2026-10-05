@@ -9,7 +9,7 @@ import { toast } from "sonner";
 import { AppShell } from "@/components/mobile/app-shell";
 import { Dial } from "@/components/bezel/dial";
 import { Icon } from "@/components/bezel/icons";
-import { Button, Label, Note, SeatRuler, Segmented } from "@/components/bezel/kit";
+import { Button, Label, LowFunds, Note, SeatRuler, Segmented } from "@/components/bezel/kit";
 import { useSolanaPoolActions } from "@/hooks/use-solana-program";
 import { useBalance } from "@/hooks/use-balance";
 import { clampUtf8, formatAmount, sanitizeAmountInput } from "@/lib/format";
@@ -21,6 +21,8 @@ const MAX_MEMBERS = 20;
 // The program stores the name in 32 bytes and rejects longer UTF-8, not 32 characters.
 const NAME_MAX_BYTES = 32;
 const SOL_DECIMALS = 9;
+// The first stake or payment into an empty vault must leave it rent-exempt (0.00089 SOL)
+const MIN_CONTRIBUTION = 0.001;
 const STAKES = [0, 1, 2, 3] as const;
 const DRAWS = ["manual", "auto"] as const;
 // Creating a circle pays rent for the pool account, about 0.006 SOL on devnet.
@@ -63,7 +65,8 @@ function CreateForm({ onCreated }: { onCreated: (c: Created) => void }) {
   const currency = "SOL" as const;
   const value = parseFloat(amount) || 0;
   const nameBytes = new TextEncoder().encode(name.trim()).length;
-  const valid = nameBytes > 0 && nameBytes <= NAME_MAX_BYTES && value > 0;
+  const valid = nameBytes > 0 && nameBytes <= NAME_MAX_BYTES && value >= MIN_CONTRIBUTION;
+  const tooSmall = value > 0 && value < MIN_CONTRIBUTION;
   const autoMode = draws === "auto";
   const short = connected && balance.sol !== null && balance.sol < CREATE_COST;
 
@@ -149,8 +152,8 @@ function CreateForm({ onCreated }: { onCreated: (c: Created) => void }) {
 
       <div className="mb-2 mt-5 flex items-baseline justify-between gap-3 px-1">
         <Label>Draws</Label>
-        <span className="text-[12px] text-muted-foreground">
-          {autoMode ? "Starts when full, draws on its own" : "You start it; anyone draws after the deadline"}
+        <span className="text-balance text-right text-[12px] text-muted-foreground">
+          {autoMode ? "Starts when full. Draws itself." : "You start it. Anyone can draw."}
         </span>
       </div>
       <Segmented
@@ -174,18 +177,23 @@ function CreateForm({ onCreated }: { onCreated: (c: Created) => void }) {
           </p>
         </div>
       </div>
-      <p className="bz-help px-1">Rounds last 5 minutes on devnet.</p>
+      <p className={tooSmall ? "bz-help bz-help-signal" : "bz-help"}>
+        {tooSmall ? "The smallest round is 0.001 SOL." : "Rounds last 5 minutes on devnet."}
+      </p>
 
-      <Button className="mt-4" onClick={submit} disabled={(connected && !valid) || short} busy={isLoading}>
-        {!connected ? "Connect wallet to create" : short ? "Not enough SOL" : "Create circle"}
-      </Button>
-      {short && (
-        <p className="bz-help text-center">
-          <a href="https://faucet.solana.com" target="_blank" rel="noopener noreferrer" className="bz-link">
-            Get devnet SOL
-          </a>
-        </p>
-      )}
+      {/* The main button stays above the tab bar on short screens */}
+      <div className="sticky bottom-[calc(62px+env(safe-area-inset-bottom))] z-10 -mx-4 mt-3 bg-background px-4 pb-3 pt-2 shadow-[0_-10px_12px_-8px_var(--background)]">
+        <Button onClick={submit} disabled={(connected && !valid) || short} busy={isLoading}>
+          {!connected ? "Connect wallet to create" : "Create circle"}
+        </Button>
+        {connected && short ? (
+          <p className="bz-help text-center">
+            <LowFunds />
+          </p>
+        ) : connected && !valid && !tooSmall ? (
+          <p className="bz-help text-center">Name it and set an amount.</p>
+        ) : null}
+      </div>
     </div>
   );
 }
@@ -235,7 +243,14 @@ function InviteOnce({ created }: { created: Created }) {
     }
   };
 
-  const ring = { seats: created.seats, mode: "pending" as const, open: Array.from({ length: created.seats }, (_, i) => i) };
+  // Once seated, the first mark is yours
+  const ring = {
+    seats: created.seats,
+    mode: "pending" as const,
+    open: Array.from({ length: created.seats }, (_, i) => i).filter((i) => !seated || i > 0),
+    staked: seated && created.joinStake > 0 ? [0] : [],
+    you: seated ? 0 : -1,
+  };
 
   if (!code) {
     return (
