@@ -177,6 +177,8 @@ export async function buildDepositStakeTransaction(
 
 export interface StartPoolParams {
   poolAddress: PublicKey;
+  /** Full roster of member PDAs when stake is enabled. Order is not checked. */
+  memberAccounts?: PublicKey[];
 }
 
 export async function buildStartPoolTransaction(
@@ -190,6 +192,13 @@ export async function buildStartPoolTransaction(
       authority,
       pool: params.poolAddress,
     })
+    .remainingAccounts(
+      (params.memberAccounts ?? []).map((pubkey) => ({
+        pubkey,
+        isWritable: false,
+        isSigner: false,
+      }))
+    )
     .instruction();
 
   return new Transaction().add(ix);
@@ -263,6 +272,8 @@ export interface ExecuteDrawParams {
   derivedWinner: PublicKey;
   /** Every roster member PDA. Order does not select the winner. */
   memberAccounts: PublicKey[];
+  /** Current-round Payment PDA for each member, same order as memberAccounts. */
+  paymentAccounts: PublicKey[];
 }
 
 export async function buildCommitDrawTransaction(
@@ -300,13 +311,18 @@ export async function buildExecuteDrawTransaction(
       systemProgram: SystemProgram.programId,
       slotHashes: SLOT_HASHES_SYSVAR,
     })
-    .remainingAccounts(
-      params.memberAccounts.map((pubkey) => ({
+    .remainingAccounts([
+      ...params.memberAccounts.map((pubkey) => ({
         pubkey,
         isWritable: true,
         isSigner: false,
-      }))
-    )
+      })),
+      ...params.paymentAccounts.map((pubkey) => ({
+        pubkey,
+        isWritable: false,
+        isSigner: false,
+      })),
+    ])
     .instruction();
 
   return new Transaction().add(ix);
