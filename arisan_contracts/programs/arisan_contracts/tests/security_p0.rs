@@ -1262,3 +1262,187 @@ async fn full_circle_runs_every_round_then_completes() {
     winners.dedup();
     assert_eq!(winners.len(), 3, "every member wins once");
 }
+
+fn fund_players(test: &mut ProgramTest, n: usize) -> Vec<Keypair> {
+    (0..n)
+        .map(|_| {
+            let player = Keypair::new();
+            test.add_account(
+                player.pubkey(),
+                Account::new(5_000_000_000, 0, &system_program::id()),
+            );
+            player
+        })
+        .collect()
+}
+
+async fn leave_pool(context: &mut ProgramTestContext, fixture: &PoolFixture, user: &Keypair) {
+    let member = pda(&[b"member", fixture.pool.as_ref(), user.pubkey().as_ref()]);
+    let ix = Instruction {
+        program_id: arisan_contracts::ID,
+        accounts: arisan_contracts::accounts::LeavePool {
+            user: user.pubkey(),
+            pool: fixture.pool,
+            member,
+            vault: fixture.vault,
+            system_program: system_program::id(),
+        }
+        .to_account_metas(None),
+        data: arisan_contracts::instruction::LeavePool {}.data(),
+    };
+    let result = if user.pubkey() == context.payer.pubkey() {
+        send(context, &[ix], &[]).await
+    } else {
+        send(context, &[ix], &[user]).await
+    };
+    assert_ok(&result, "leave_pool");
+}
+
+async fn claim_refund(context: &mut ProgramTestContext, fixture: &PoolFixture, user: &Keypair) {
+    let member = pda(&[b"member", fixture.pool.as_ref(), user.pubkey().as_ref()]);
+    let ix = Instruction {
+        program_id: arisan_contracts::ID,
+        accounts: arisan_contracts::accounts::ClaimStakeRefund {
+            user: user.pubkey(),
+            pool: fixture.pool,
+            member,
+            vault: fixture.vault,
+            system_program: system_program::id(),
+        }
+        .to_account_metas(None),
+        data: arisan_contracts::instruction::ClaimStakeRefund {}.data(),
+    };
+    let result = if user.pubkey() == context.payer.pubkey() {
+        send(context, &[ix], &[]).await
+    } else {
+        send(context, &[ix], &[user]).await
+    };
+    assert_ok(&result, "claim_stake_refund");
+}
+
+async fn run_full_circle(seats: u8) {
+    let extra = seats as usize - 1;
+    let mut test = program_test();
+    let extras = fund_players(&mut test, extra);
+    let mut context = test.start_with_context().await;
+    let payer = context.payer.insecure_clone();
+
+    let fixture = create_pool(&mut context, seats, true).await;
+    join(&mut context, &fixture, &payer).await;
+    for player in &extras {
+        join(&mut context, &fixture, player).await;
+    }
+
+    let mut players: Vec<&Keypair> = vec![&payer];
+    players.extend(extras.iter());
+    let wallets: Vec<Pubkey> = players.iter().map(|p| p.pubkey()).collect();
+
+    let vault_start = lamports(&mut context, fixture.vault).await;
+    for player in &players {
+        deposit_stake(&mut context, &fixture, player).await;
+    }
+    assert_eq!(
+        lamports(&mut context, fixture.vault).await - vault_start,
+        CONTRIB * seats as u64
+    );
+
+    start_pool(&mut context, &fixture, &wallets).await;
+    let pool = load_pool(&account_data(&mut context, fixture.pool).await);
+    assert!(pool.status == PoolStatus::Active);
+    assert_eq!(pool.member_count, seats);
+    assert_eq!(pool.max_members, seats);
+    assert_eq!(pool.total_rounds, seats);
+
+    let mut winners = Vec::new();
+    for round in 1..=seats {
+        let winner = play_round(&mut context, &fixture, &players, round).await;
+        assert!(
+            !winners.contains(&winner),
+            "a member won twice in a {seats}-seat circle"
+        );
+        winners.push(winner);
+        let draw = load_draw(
+            &account_data(
+                &mut context,
+                pda(&[b"draw", fixture.pool.as_ref(), &[round]]),
+            )
+            .await,
+        );
+        assert_eq!(draw.winner, winner);
+        assert_eq!(draw.amount, CONTRIB * seats as u64);
+        assert!(draw.claimed);
+    }
+    assert_eq!(winners.len(), seats as usize);
+
+    let pool = load_pool(&account_data(&mut context, fixture.pool).await);
+    assert!(pool.status == PoolStatus::Completed);
+    assert_eq!(pool.current_round, seats);
+
+    for player in &players {
+        let before = lamports(&mut context, player.pubkey()).await;
+        claim_refund(&mut context, &fixture, player).await;
+        let gained = lamports(&mut context, player.pubkey()).await - before;
+        // Signers other than the fixture payer pay a tiny tx fee out of the refund.
+        assert!(
+            gained + 20_000 >= CONTRIB,
+            "stake refund is 1x contribution minus tx fee, got {gained}"
+        );
+        let member = load_member(
+            &account_data(
+                &mut context,
+                pda(&[
+                    b"member",
+                    fixture.pool.as_ref(),
+                    player.pubkey().as_ref(),
+                ]),
+            )
+            .await,
+        );
+        assert!(!member.stake_deposited);
+    }
+}
+
+#[tokio::test]
+async fn five_member_circle_pays_draws_and_refunds_every_seat() {
+    run_full_circle(5).await;
+}
+
+#[tokio::test]
+async fn ten_member_circle_pays_draws_and_refunds_every_seat() {
+    run_full_circle(10).await;
+}
+
+#[tokio::test]
+async fn twenty_member_circle_can_start_pay_and_draw_max_roster() {
+    run_full_circle(20).await;
+}
+
+#[tokio::test]
+async fn pending_member_can_leave_and_reclaim_stake() {
+    let member2 = Keypair::new();
+    let mut test = program_test();
+    test.add_account(
+        member2.pubkey(),
+        Account::new(2_000_000_000, 0, &system_program::id()),
+    );
+    let mut context = test.start_with_context().await;
+    let payer = context.payer.insecure_clone();
+    let fixture = create_pool(&mut context, 3, true).await;
+    join(&mut context, &fixture, &payer).await;
+    join(&mut context, &fixture, &member2).await;
+    deposit_stake(&mut context, &fixture, &member2).await;
+
+    let before = lamports(&mut context, member2.pubkey()).await;
+    let vault_before = lamports(&mut context, fixture.vault).await;
+    leave_pool(&mut context, &fixture, &member2).await;
+
+    let pool = load_pool(&account_data(&mut context, fixture.pool).await);
+    assert_eq!(pool.member_count, 1);
+    assert_eq!(pool.roster_len, 1);
+    assert_eq!(
+        lamports(&mut context, fixture.vault).await,
+        vault_before - CONTRIB
+    );
+    assert!(lamports(&mut context, member2.pubkey()).await > before);
+}
+
