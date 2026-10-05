@@ -4,7 +4,7 @@
 
 | # | Screen |
 |---|--------|
-| 00-1…4 | First-visit walkthrough, told on the 3D dial: Together, Pay in, Jackpot, Your wallet |
+| 00-1…4 | First-visit walkthrough, how Arisan works on the 3D dial: Pick your people, Pay in each round, Take the pot once, You approve |
 | 01 | Welcome (signed out): the dial, Connect wallet, Join with code |
 | 02 | Home: next-draw dial and your circles |
 | 03 / 03b | Circle: dial with seat numbers, pot / paid / draw, Pay, last result, Seats tab |

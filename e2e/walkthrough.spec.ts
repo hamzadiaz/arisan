@@ -7,7 +7,7 @@ import { expectNoForbiddenCopy, gotoReady } from "./helpers";
 test.use({ storageState: { cookies: [], origins: [] } });
 
 const KEY = "arisan.walkthrough.v1";
-const TITLES = ["Together", "Pay in", "Jackpot", "Your wallet"];
+const TITLES = ["Pick your people", "Pay in each round", "Take the pot once", "You approve"];
 const walkthrough = (page: Page) => page.getByTestId("walkthrough");
 const stored = (page: Page) => page.evaluate((k) => localStorage.getItem(k), KEY);
 
@@ -50,9 +50,24 @@ test("Skip closes it on any screen and it stays closed", async ({ page }) => {
 test("the last screen is about your wallet, never keys", async ({ page }) => {
   await gotoReady(page, "/");
   for (let i = 0; i < 3; i++) await walkthrough(page).getByRole("button", { name: "Next" }).click();
-  await expect(walkthrough(page).getByRole("heading", { name: "Your wallet" })).toBeVisible();
-  await expect(walkthrough(page).getByText("Nothing moves until you approve.")).toBeVisible();
+  await expect(walkthrough(page).getByRole("heading", { name: "You approve" })).toBeVisible();
+  await expect(walkthrough(page).getByText("Your wallet", { exact: true })).toBeVisible();
+  await expect(walkthrough(page).getByText("Every payment asks first.")).toBeVisible();
   await expect(walkthrough(page)).not.toContainText(/keys/i);
+});
+
+test("you can try the draw and the approval", async ({ page }) => {
+  await gotoReady(page, "/");
+  for (let i = 0; i < 2; i++) await walkthrough(page).getByRole("button", { name: "Next" }).click();
+  await expect(walkthrough(page).getByRole("heading", { name: "Take the pot once" })).toBeVisible();
+  await walkthrough(page).getByRole("button", { name: "Draw" }).click();
+  await expect(walkthrough(page).getByRole("status").filter({ hasText: "Citra takes 3 SOL" })).toBeVisible({ timeout: 8_000 });
+
+  await walkthrough(page).getByRole("button", { name: "Next" }).click();
+  await expect(walkthrough(page).getByText("Approve payment")).toBeVisible();
+  await walkthrough(page).getByRole("button", { name: "Approve" }).click();
+  await expect(walkthrough(page).getByRole("status").filter({ hasText: "You paid round 2" })).toBeVisible({ timeout: 8_000 });
+  await expect(walkthrough(page).getByText("Approve payment")).toBeHidden();
 });
 
 test("keys move through it: arrows step, Escape skips, Tab stays inside", async ({ page }) => {
@@ -76,7 +91,8 @@ test("keys move through it: arrows step, Escape skips, Tab stays inside", async 
 });
 
 const scene = (page: Page) => walkthrough(page).getByTestId("walkthrough-scene");
-const LAST_STEP = ["6", "6", "1", "1"];
+// Where each beat rests without motion (the flat dial, or reduced motion)
+const REST_STEP = ["6", "6", "0", "1"];
 
 test("each beat plays on the app's own dial, never remounted between beats", async ({ page }) => {
   await gotoReady(page, "/");
@@ -85,8 +101,8 @@ test("each beat plays on the app's own dial, never remounted between beats", asy
   const handle = await dial.elementHandle();
   for (let beat = 0; beat < 4; beat++) {
     await expect(scene(page)).toHaveAttribute("data-beat", String(beat));
-    // Software WebGL (CI) keeps the flat dial, which shows where each beat ends
-    if ((await dial.getAttribute("data-dial")) === "svg") await expect(scene(page)).toHaveAttribute("data-step", LAST_STEP[beat]);
+    // Software WebGL (CI) keeps the flat dial: each beat rests where it explains itself
+    if ((await dial.getAttribute("data-dial")) === "svg") await expect(scene(page)).toHaveAttribute("data-step", REST_STEP[beat]);
     if (beat < 3) await walkthrough(page).getByRole("button", { name: "Next" }).click();
   }
   expect(await handle!.evaluate((d) => d.isConnected)).toBe(true);
@@ -123,14 +139,16 @@ test("the 3D dial plays each beat, then hands the landing dial a warm engine", a
 test.describe("reduced motion", () => {
   test.use({ reducedMotion: "reduce" });
 
-  test("each beat shows where it ends and stays still", async ({ page }) => {
+  test("each beat rests where it explains itself; a tap jumps to its end", async ({ page }) => {
     await gotoReady(page, "/");
-    for (let beat = 0; beat < 2; beat++) {
+    for (let beat = 0; beat < 3; beat++) {
       await expect(scene(page)).toHaveAttribute("data-beat", String(beat));
-      await expect(scene(page)).toHaveAttribute("data-step", LAST_STEP[beat]);
+      await expect(scene(page)).toHaveAttribute("data-step", REST_STEP[beat]);
       await page.waitForTimeout(600);
-      await expect(scene(page)).toHaveAttribute("data-step", LAST_STEP[beat]);
-      await walkthrough(page).getByRole("button", { name: "Next" }).click();
+      await expect(scene(page)).toHaveAttribute("data-step", REST_STEP[beat]);
+      if (beat < 2) await walkthrough(page).getByRole("button", { name: "Next" }).click();
     }
+    await walkthrough(page).getByRole("button", { name: "Draw" }).click();
+    await expect(scene(page)).toHaveAttribute("data-step", "12");
   });
 });

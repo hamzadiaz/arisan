@@ -86,6 +86,7 @@
   /* The empty dial shows the page through it */
   --dial-case: var(--background);
   --dial-glass: url(#bz-glass-light);
+  --intro-title: linear-gradient(180deg, #a3801f 10%, #7a5c0c 62%, #5e4508 100%);
 }
 
 .dark {
@@ -129,6 +130,7 @@
   --dial-lit: #5cf2b6;
   --dial-case: var(--background);
   --dial-glass: url(#bz-glass);
+  --intro-title: linear-gradient(180deg, #fbefc4 10%, #e2bf5c 62%, #c99a3e 100%);
 }
 
 @layer base {
@@ -1078,41 +1080,244 @@
 }
 
 @layer components {
-  /* First-visit intro: the dial on a dark table, lit from above, emerald under the glass */
+  /* First-visit intro: a card on the app's own page, the dial and its people inside */
   .bz-intro {
-    background:
-      radial-gradient(70% 42% at 50% 38%, rgba(18, 160, 142, 0.2), transparent 72%),
-      radial-gradient(90% 46% at 50% -6%, rgba(212, 175, 55, 0.12), transparent 70%),
-      linear-gradient(180deg, #0e0d09 0%, #0a0f0d 46%, #06120e 100%);
+    background: var(--background);
+  }
+
+  .bz-intro-card {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 14px 18px 18px;
+    border-radius: 28px;
+    text-align: center;
+    background: var(--card);
+    box-shadow: inset 0 0 0 1px var(--border), 0 26px 50px -34px rgba(0, 0, 0, 0.6);
+  }
+
+  .bz-eyebrow {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    padding: 6px 11px 6px 9px;
+    border-radius: 999px;
+    font-family: var(--font-label);
+    font-size: 9.5px;
+    line-height: 1;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--gold-hi);
+    background: color-mix(in srgb, var(--gold) 11%, transparent);
+  }
+
+  .bz-eyebrow::before {
+    content: "";
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--gold);
   }
 
   .bz-intro-title {
-    font-size: 34px;
-    line-height: 1.1;
-    font-weight: 600;
-    letter-spacing: -0.025em;
+    font-family: var(--font-display), Georgia, serif;
+    font-size: 36px;
+    line-height: 1.04;
+    font-weight: 800;
+    letter-spacing: -0.012em;
+    text-wrap: balance;
     color: var(--gold-hi);
-    background: linear-gradient(180deg, #fbefc4 10%, #e2bf5c 62%, #c99a3e 100%);
+    background: var(--intro-title);
     -webkit-background-clip: text;
     background-clip: text;
     -webkit-text-fill-color: transparent;
   }
 
+  .bz-intro-next,
+  .bz-intro-back {
+    height: 44px;
+    flex: none;
+    border-radius: 22px;
+    padding: 0 20px;
+    font-size: 15px;
+    font-weight: 600;
+    transition: transform 90ms ease-out;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  .bz-intro-next {
+    color: var(--gold-ink);
+    background-color: var(--cta-2);
+    background-image: linear-gradient(180deg, var(--cta-1) 0%, var(--cta-2) 100%);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.42), 0 12px 26px -16px color-mix(in srgb, var(--gold) 80%, transparent);
+  }
+
+  .bz-intro-back {
+    padding: 0 18px;
+    font-weight: 500;
+    color: var(--foreground);
+    box-shadow: inset 0 0 0 1px var(--line-2);
+  }
+
+  .bz-intro-back:disabled {
+    visibility: hidden;
+  }
+
+  .bz-intro-next:active,
+  .bz-intro-back:active {
+    transform: scale(0.97);
+  }
+
+  /* Progress: a gold pill on the slide you're on */
   .bz-intro-step {
-    width: 16px;
-    height: 3px;
-    border-radius: 2px;
+    width: 6px;
+    height: 6px;
+    border-radius: 3px;
     background: var(--line-2);
     transition: width 0.3s ease, background-color 0.3s ease;
   }
 
   .bz-intro-step.is-done {
-    background: var(--gold);
+    background: color-mix(in srgb, var(--gold) 55%, transparent);
   }
 
   .bz-intro-step.is-now {
-    width: 28px;
-    background: var(--glow);
+    width: 22px;
+    background: var(--gold);
+  }
+
+  /* The table: people sit just outside the glass */
+  .bz-seat-spot {
+    position: absolute;
+    z-index: 1;
+    transform: translate(-50%, -50%);
+  }
+
+  .bz-person {
+    display: grid;
+    width: 32px;
+    height: 32px;
+    place-items: center;
+    border-radius: 50%;
+    font-size: 12.5px;
+    font-weight: 600;
+    color: #fff;
+    background: var(--tone);
+    box-shadow: 0 0 0 2px var(--card), 0 6px 14px -6px rgba(0, 0, 0, 0.6);
+    transition: box-shadow 0.25s ease;
+  }
+
+  .bz-person.is-you {
+    width: 36px;
+    height: 36px;
+    font-size: 10.5px;
+    color: var(--gold-ink);
+    background: linear-gradient(180deg, var(--cta-1), var(--cta-2));
+  }
+
+  .bz-person.is-paid {
+    box-shadow: 0 0 0 2px var(--card), 0 0 0 3.5px var(--glow), 0 6px 14px -6px rgba(0, 0, 0, 0.6);
+  }
+
+  .bz-person.is-pick,
+  .bz-person.is-winner {
+    box-shadow: 0 0 0 2px var(--card), 0 0 0 4px var(--gold), 0 0 20px 3px color-mix(in srgb, var(--gold) 55%, transparent);
+  }
+
+  .bz-coin-chip {
+    position: absolute;
+    z-index: 2;
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background: radial-gradient(circle at 35% 30%, #fff6d6, #e2bf5c 45%, #a97e2c);
+    box-shadow: 0 0 12px color-mix(in srgb, var(--gold) 60%, transparent);
+  }
+
+  .bz-win-tag {
+    position: absolute;
+    bottom: 26px;
+    left: 50%;
+    white-space: nowrap;
+    padding: 4px 9px;
+    border-radius: 999px;
+    font-size: 11.5px;
+    font-weight: 600;
+    color: var(--gold-ink);
+    background: linear-gradient(180deg, var(--cta-1), var(--cta-2));
+    box-shadow: 0 8px 18px -8px rgba(0, 0, 0, 0.6);
+  }
+
+  .bz-intro-status {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 13.5px;
+    color: var(--muted-foreground);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .bz-intro-status b {
+    font-weight: 600;
+    color: var(--foreground);
+  }
+
+  /* "Try it" buttons inside the demo: the draw, the approval */
+  .bz-intro-try {
+    display: inline-flex;
+    height: 34px;
+    align-items: center;
+    gap: 6px;
+    border-radius: 17px;
+    padding: 0 14px;
+    font-size: 13.5px;
+    font-weight: 600;
+    color: var(--gold-ink);
+    background-image: linear-gradient(180deg, var(--cta-1) 0%, var(--cta-2) 100%);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.42);
+    animation: bz-nudge 1.8s ease-in-out infinite;
+  }
+
+  .bz-intro-sheet {
+    position: absolute;
+    right: 0;
+    bottom: 10px;
+    left: 0;
+    z-index: 3;
+    padding: 13px 14px 12px;
+    border-radius: 20px;
+    background: var(--sheet);
+    box-shadow: inset 0 0 0 1px var(--line-2), 0 18px 40px -16px rgba(0, 0, 0, 0.6);
+  }
+
+  .bz-intro-demo {
+    margin-left: auto;
+    padding: 3px 7px;
+    border-radius: 6px;
+    font-family: var(--font-label);
+    font-size: 8.5px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--muted-foreground);
+    box-shadow: inset 0 0 0 1px var(--line-2);
+  }
+
+  .bz-intro-fact {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 12px 8px 11px;
+    border-radius: 18px;
+    text-align: center;
+    background: var(--card);
+    box-shadow: inset 0 0 0 1px var(--border);
+  }
+}
+
+@keyframes bz-nudge {
+  50% {
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.42), 0 0 0 6px color-mix(in srgb, var(--gold) 22%, transparent);
   }
 }
 
@@ -1162,8 +1367,13 @@
     animation: none;
   }
 
-  .bz-intro-step {
+  .bz-intro-step,
+  .bz-person {
     transition: none;
+  }
+
+  .bz-intro-try {
+    animation: none;
   }
 }
 

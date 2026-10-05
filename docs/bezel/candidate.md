@@ -15,7 +15,7 @@ Design canvases (private): directions at https://claude.ai/artifact/17bwXGTQk7Ad
 - Copy says "circle". Toasts are one title, one quiet line and an Explorer link.
 - The app bar has round bezel buttons for Back and theme, the ARISAN wordmark in the dial's small caps on Home, and a Connect chip with a wallet icon. The tab bar is a floating dock: Home (the coin and its pentagon) and Join (an invite ticket) either side of Create, a gold coin set into the dock.
 - Join leads with a dial that saves you a lit seat (then shows the found circle with your seat), dot placeholders instead of sample letters, a lookup that runs on the eighth character, and a short "how joining works" track.
-- The first-visit intro tells its four beats on the 3D dial itself: the seats fill (yours first), each payment lights its seat, the bezel spins a winner under the pip, and in round two your seat lights only when you approve. It replaces the 2D coin scene, stays dark in both themes, works by swipe, buttons or keys, and hands its warmed-up dial to the page underneath.
+- The first-visit intro explains Arisan in four slides, laid out like Hamza's PurrSpeak onboarding: an eyebrow, the 3D dial with six people seated round it, a serif headline (Playfair Display) with one concrete line, Back, dots and Next in a card, and three facts underneath (0% interest, a fair draw, the stake back). The people take their seats; each pays in and a coin flies into the pot (6 × 0.5 = 3 SOL); tap Draw and a light runs round the table to the winner, whose coin flips; on the last slide a demo wallet asks you to approve round two. It follows the app theme, works by swipe, buttons or keys, rests on each slide's point with reduced motion, and hands its warmed-up dial to the page underneath.
 
 **Every program action, end to end**
 
@@ -69,7 +69,7 @@ Not covered by any client change, and worth a program fix: if nobody finishes a 
 - Build: `next build` → `docs/bezel/build.log`.
 - Playwright: full UI + API suite on the mobile-390 project, against `next build && next start` → `docs/bezel/e2e.log`.
   - Run through a git-ignored Windows mirror of `playwright.config.ts`, because its web server uses POSIX `env VAR=x`. The mirror passes the same variables through `webServer.env` and uses the same 30 s test timeout as CI; the server was started separately with that environment on port 3117.
-  - Result: 97 passed, 7 skipped (the six `UI_PROOF` captures and the opt-in chain test), 0 failed. Typecheck clean.
+  - Result: 98 passed, 7 skipped (the six `UI_PROOF` captures and the opt-in chain test), 0 failed. Typecheck clean.
 - On a real chain (`docs/bezel/onchain.log`, `docs/bezel/chain-ui.log`): the repo's program, built in Docker and loaded into `solana-test-validator` 1.18 at the app's address.
   - Every action through the app's own builders and the scheduler: 25 of 25 steps across three circles, the two finished ones ending with an empty vault. Manual: create (invite code read back), join ×2, stake ×2, start, pay, a non-host draws after the deadline, pay, the host draws, claim_stake_refund, refund_all_stakes. Automatic: join takes the stake, leave refunds it, the second join starts the circle, the scheduler marks the unpaid seat and draws the paid one, restake-and-pay in one transaction, the scheduler draws round 2, both refunds. Stranded: the scheduler leaves a manual circle alone, then finishes a draw a member started and abandoned.
   - The UI itself, two browsers with wallets that really sign (`e2e/chain.spec.ts`, opt-in with `CHAIN_RPC`): create, take your seat, stake, join with the code, stake, start, both pay, Draw now then Finish, both pay, the host draws round 2, both stakes back, "Complete". Passed in 13 minutes.
@@ -80,7 +80,7 @@ Not covered by any client change, and worth a program fix: if nobody finishes a 
   - the wallet chip opens the sheet, then disconnects;
   - copy: circle, seats, sentence-case "Transaction failed", typographic apostrophes.
 - Anchor `security_p0`: not run here; CI runs it (green on `main`). The program is untouched.
-- The walkthrough tests were rewritten for the dial-based intro: four beats on one dial, keys (arrows, Escape, a Tab loop), reduced motion (each beat shows where it ends), and the hand-off: under the intro the landing dial waits with its SVG hidden, and on Get started it goes straight to 3D (`auto` → `webgl`, never `svg`) while the intro fades.
+- The walkthrough tests were rewritten for the new intro: four slides on one dial, trying the draw and the approval, keys (arrows, Escape, a Tab loop), reduced motion (each slide rests on its point; a tap jumps to the end), and the hand-off: under the intro the landing dial waits with its SVG hidden, and on Get started it goes straight to 3D (`auto` → `webgl`, never `svg`) while the intro fades.
 
 **Reviewers** (our agents, not Hamza's)
 - Phase 2: design fidelity and build feasibility on the canvas. Fixes in `bezel: review round 1 on the foundation`.
@@ -99,6 +99,7 @@ Not covered by any client change, and worth a program fix: if nobody finishes a 
 
 **Live feedback, 5 October**
 - "Walkthrough screens don't look good": they were still the original 2D canvas scene (cartoon coins, a bowl, rays), the one screen the redesign hadn't touched. The intro now runs on the Bezel dial (see Look).
+- Then Hamza: the current slides "are lame and not that clear", with his PurrSpeak onboarding as the reference (a screen recording). The intro was rebuilt to explain the app step by step, in that layout (see Look).
 - "When done and joined something weird happens with the landing page icon": filmed on the live site with a real GPU. After the intro, the landing dial painted its flat SVG (face-on, bright) and about 1.5 s later crossfaded into the 3D dial (tilted, hammered): a different shape morphing in place. three.js only began loading once the intro closed. Connecting a wallet did it again, and an account with no circles then lost the coin altogether (the empty bezel). Fixed: the SVG never paints first where 3D is coming, the intro warms the engine, the hand-off is instant, and Home keeps the coin in the glass while it loads, when you have no circles and when Solana can't be reached.
 
 **Not in this change**

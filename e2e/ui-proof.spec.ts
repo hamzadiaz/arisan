@@ -244,11 +244,11 @@ for (const theme of ["dark", "light"] as const) {
       await setTheme(page, theme);
       await page.goto("/?dial=3d");
       const walkthrough = page.getByTestId("walkthrough");
-      for (const [i, title] of ["Together", "Pay in", "Jackpot", "Your wallet"].entries()) {
+      for (const [i, title] of ["Pick your people", "Pay in each round", "Take the pot once", "You approve"].entries()) {
         await expect(walkthrough.getByRole("heading", { name: title })).toBeVisible();
         await page.waitForLoadState("networkidle").catch(() => {});
-        // Let the beat's transition play out so the proof shows the settled scene.
-        await page.waitForTimeout(1600);
+        // Let the slide play out (the draw runs by itself) so the proof shows it settled.
+        await page.waitForTimeout(4200);
         await shot(page, theme, `00-walkthrough-${i + 1}`);
         await walkthrough.getByRole("button", { name: i === 3 ? "Get started" : "Next" }).click();
       }

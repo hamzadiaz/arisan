@@ -1,5 +1,5 @@
 import type { Metadata, Viewport } from "next";
-import { Chivo, Chivo_Mono, Michroma } from "next/font/google";
+import { Chivo, Chivo_Mono, Michroma, Playfair_Display } from "next/font/google";
 import { ThemeProvider } from "@/components/providers/theme-provider";
 import { SolanaProvider } from "@/components/providers/solana-provider";
 import { MobileWalletRegistration } from "@/components/providers/mobile-wallet-registration";
@@ -25,6 +25,13 @@ const michroma = Michroma({
   variable: "--font-michroma",
   subsets: ["latin"],
   weight: "400",
+});
+
+// The intro's headlines: a high-contrast serif, like the inscription on Hamza's end card
+const playfair = Playfair_Display({
+  variable: "--font-display",
+  subsets: ["latin"],
+  weight: "800",
 });
 
 export const metadata: Metadata = {
@@ -69,7 +76,7 @@ export default function RootLayout({
     <html
       lang="en"
       suppressHydrationWarning
-      className={`${chivo.variable} ${chivoMono.variable} ${michroma.variable}`}
+      className={`${chivo.variable} ${chivoMono.variable} ${michroma.variable} ${playfair.variable}`}
     >
       <head>
         {/* Before first paint: does this device draw the 3D dial? */}

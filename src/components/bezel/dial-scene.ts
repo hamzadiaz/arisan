@@ -274,6 +274,8 @@ export interface AttachOptions {
   /** The page color under the dial; light mode draws it opaque so the glass refracts the page. */
   background: string;
   reducedMotion: boolean;
+  /** Seats never turn (labels sit beside them, e.g. the intro's people): a new winner flips the coin without the spin. */
+  fixedSeats?: boolean;
 }
 
 class DialEngine {
@@ -576,12 +578,12 @@ class DialEngine {
     this.render();
   }
 
-  /** Where each seat number sits on screen (0–1), following the current turn. */
-  seatLabels() {
+  /** Where each seat's label sits on screen (0–1), following the current turn; `out` is the radius on the table. */
+  seatLabels(out = 1.48) {
     this.root.updateMatrixWorld(true);
     return Array.from({ length: this.spec.seats }, (_, i) => {
       const a = this.seatAngle(i) - this.dial.rotation.y;
-      const r = 1.48 + 0.12 * Math.max(0, Math.sin(a));
+      const r = out + 0.12 * Math.max(0, Math.sin(a));
       const v = new Vector3(r * Math.cos(a), 0.19, r * Math.sin(a)).project(this.camera);
       return { x: (v.x + 1) / 2, y: (1 - v.y) / 2 };
     });
@@ -840,7 +842,7 @@ class DialEngine {
     const newWin = (next.won ?? []).find((i) => !(prev.won ?? []).includes(i));
     if (newWin !== undefined && next.mode !== "pending") {
       this.spinning = false;
-      await this.spinTo(newWin);
+      if (!this.opts.fixedSeats) await this.spinTo(newWin);
       if (gen !== this.gen) return;
       this.spec = next;
       this.build();
@@ -862,7 +864,7 @@ class DialEngine {
 
   private tick(amount: number) {
     // A free spin owns the rotation; a tick would snap it back
-    if (this.spinning) return Promise.resolve();
+    if (this.spinning || this.opts.fixedSeats) return Promise.resolve();
     const base = this.dial.rotation.y;
     return this.tween(0.22, (k) => (this.dial.rotation.y = base + amount * Math.sin(k * Math.PI)));
   }

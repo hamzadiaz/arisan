@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
+import { type ReactNode, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
 import { cn } from "@/lib/utils";
 import { introSeen, subscribeIntro } from "@/components/onboarding/intro-store";
 import type { DialSpec } from "./dial-spec";
@@ -58,6 +58,26 @@ const watchMotion = (changed: () => void) => {
   return () => mq.removeEventListener("change", changed);
 };
 const watchNothing = () => () => {};
+
+/** The opaque colour behind the dial (a card or the page): light mode draws it so the glass refracts it. */
+function surfaceBehind(el: HTMLElement) {
+  // Any CSS colour (rgb, oklab, color-mix…) read back as sRGB through one pixel
+  const px = document.createElement("canvas").getContext("2d", { willReadFrequently: true });
+  for (let n = el.parentElement; n && px; n = n.parentElement) {
+    const css = getComputedStyle(n).backgroundColor;
+    if (css === "transparent" || css === "rgba(0, 0, 0, 0)") continue;
+    px.clearRect(0, 0, 1, 1);
+    px.fillStyle = css;
+    px.fillRect(0, 0, 1, 1);
+    const [r, g, b, a] = px.getImageData(0, 0, 1, 1).data;
+    if (a > 128) return `rgb(${r}, ${g}, ${b})`;
+  }
+  return getComputedStyle(document.body).backgroundColor;
+}
+
+type SeatSpot = { x: number; y: number };
+/** Seat labels sit at 1.48 on the table; the flat SVG puts that radius at 0.465 of its width. */
+const LABEL_RADIUS = 1.48;
 // If the 3D dial isn't up by then (slow network or GPU), the SVG stands in until it is
 const SLOW_MS = 2500;
 
@@ -72,8 +92,14 @@ interface DialProps {
   drawing?: boolean;
   label?: string;
   className?: string;
-  /** The intro's own dial: always dark, and it holds the engine while the intro is open. */
+  /** The intro's own dial: it holds the engine while the intro is open. */
   intro?: boolean;
+  /** Seats stay put (a new winner flips the coin without the spin), so `overlay` can sit beside them. */
+  fixedSeats?: boolean;
+  /** Where `overlay` places things around the glass, in table units (the glass ends at 1.34). */
+  seatRadius?: number;
+  /** Drawn over the dial with each seat's spot (0–1 of the dial's box), or null until it draws. */
+  overlay?: (seats: SeatSpot[] | null) => ReactNode;
   /** A new scene cuts straight to `spec` instead of animating there (the intro's beats, a first read). */
   scene?: string | number;
   /** Told when the 3D dial draws (true) or the SVG stands in (false). */
@@ -86,11 +112,26 @@ interface DialProps {
  * the fallback, and never shows first where 3D is coming: the two don't look alike.
  * "auto" waits for the engine, "still" holds the last 3D frame after another dial took it.
  */
-export function Dial({ spec, size = 280, view = "hero", numerals = false, drawing = false, label, className, intro = false, scene, onLive }: DialProps) {
+export function Dial({
+  spec,
+  size = 280,
+  view = "hero",
+  numerals = false,
+  drawing = false,
+  label,
+  className,
+  intro = false,
+  fixedSeats = false,
+  seatRadius = LABEL_RADIUS,
+  overlay,
+  scene,
+  onLive,
+}: DialProps) {
   const host = useRef<HTMLDivElement>(null);
   const engine = useRef<DialEngine | null>(null);
   const latest = useRef(spec);
   const told = useRef(onLive);
+  const radius = useRef(seatRadius);
   const shownScene = useRef(scene);
   const [state, setMode] = useState<"auto" | "webgl" | "svg" | "still">("auto");
   // null on the server and while hydrating
@@ -98,7 +139,7 @@ export function Dial({ spec, size = 280, view = "hero", numerals = false, drawin
   const mode = gl === false ? "svg" : state;
   // Attached to an engine that was already warm: the canvas shows at once, without a fade
   const [instant, setInstant] = useState(false);
-  const [labels, setLabels] = useState<{ x: number; y: number }[] | null>(null);
+  const [labels, setLabels] = useState<SeatSpot[] | null>(null);
   const theme = useSyncExternalStore(watchTheme, pageTheme, () => null);
   const calm = useSyncExternalStore(watchMotion, reducedMotion, () => false);
   const [attempt, setAttempt] = useState(0);
@@ -107,6 +148,7 @@ export function Dial({ spec, size = 280, view = "hero", numerals = false, drawin
   useLayoutEffect(() => {
     latest.current = spec;
     told.current = onLive;
+    radius.current = seatRadius;
   });
 
   // Before paint: a warm engine draws this dial in its first frame.
@@ -122,10 +164,11 @@ export function Dial({ spec, size = 280, view = "hero", numerals = false, drawin
     let retry: ReturnType<typeof setTimeout> | null = null;
     let frame: HTMLCanvasElement | null = null;
     const options = (): AttachOptions => ({
-      theme: intro ? "dark" : pageTheme(),
+      theme: pageTheme(),
       view,
-      background: getComputedStyle(document.body).backgroundColor,
+      background: surfaceBehind(el),
       reducedMotion: reducedMotion(),
+      fixedSeats,
     });
     // A page's dial waits while the intro's dial holds the engine
     const held = () => !intro && !introSeen();
@@ -172,7 +215,7 @@ export function Dial({ spec, size = 280, view = "hero", numerals = false, drawin
     const warmStart = (e: DialEngine) => {
       take(e);
       void e.warm();
-      setLabels(e.seatLabels());
+      setLabels(e.seatLabels(seatRadius));
       setInstant(true);
       setMode("webgl");
     };
@@ -191,7 +234,7 @@ export function Dial({ spec, size = 280, view = "hero", numerals = false, drawin
       // Another dial may have taken it while the shaders compiled
       if (!alive || e.isLost || !holds(e)) return;
       if (slow) clearTimeout(slow);
-      setLabels(e.seatLabels());
+      setLabels(e.seatLabels(seatRadius));
       setInstant(false);
       setMode("webgl");
     };
@@ -218,7 +261,7 @@ export function Dial({ spec, size = 280, view = "hero", numerals = false, drawin
       const e = engine.current;
       if (!e) return;
       e.resize(entry.contentRect.width, entry.contentRect.height);
-      setLabels(e.seatLabels());
+      setLabels(e.seatLabels(seatRadius));
     });
     ro.observe(el);
     start();
@@ -235,14 +278,15 @@ export function Dial({ spec, size = 280, view = "hero", numerals = false, drawin
       dropFrame();
       setMode("auto");
     };
-  }, [view, attempt, intro]);
+  }, [view, attempt, intro, fixedSeats, seatRadius]);
 
   // A theme toggle restyles the attached dial in place: no hand-back, no SVG flash.
   useEffect(() => {
     const e = engine.current;
-    if (!e || mode !== "webgl" || !theme || intro) return;
-    e.setTheme(theme, getComputedStyle(document.body).backgroundColor);
-  }, [theme, mode, intro]);
+    const el = host.current;
+    if (!e || !el || mode !== "webgl" || !theme) return;
+    e.setTheme(theme, surfaceBehind(el));
+  }, [theme, mode]);
 
   useEffect(() => {
     const e = engine.current;
@@ -251,11 +295,11 @@ export function Dial({ spec, size = 280, view = "hero", numerals = false, drawin
     if (scene !== shownScene.current) {
       shownScene.current = scene;
       e.show(next);
-      setLabels(e.seatLabels());
+      setLabels(e.seatLabels(radius.current));
       return;
     }
     void e.update(next).then(() => {
-      if (engine.current === e) setLabels(e.seatLabels());
+      if (engine.current === e) setLabels(e.seatLabels(radius.current));
     });
   }, [key, mode, scene]);
 
@@ -263,7 +307,7 @@ export function Dial({ spec, size = 280, view = "hero", numerals = false, drawin
     const e = engine.current;
     if (!e || mode !== "webgl") return;
     void e.setDrawing(drawing).then(() => {
-      if (engine.current === e) setLabels(e.seatLabels());
+      if (engine.current === e) setLabels(e.seatLabels(radius.current));
     });
   }, [drawing, mode]);
 
@@ -271,9 +315,9 @@ export function Dial({ spec, size = 280, view = "hero", numerals = false, drawin
     if (mode === "webgl" || mode === "svg") told.current?.(mode === "webgl");
   }, [mode]);
 
-  const flat = numerals && mode === "svg" ? flatLabels(spec.seats) : null;
-  // The numbers can't follow a free spin; hide them until the bezel settles (it doesn't spin
-  // at all with reduced motion).
+  const flat = mode === "svg" ? flatLabels(spec.seats, seatRadius / LABEL_RADIUS) : null;
+  // Labels can't follow a free spin; hide them until the bezel settles (it doesn't spin at all
+  // with reduced motion).
   const shown = mode === "webgl" ? (drawing && !calm ? null : labels) : flat;
 
   return (
@@ -290,6 +334,7 @@ export function Dial({ spec, size = 280, view = "hero", numerals = false, drawin
       <div className="dial-poster absolute inset-[7%]" aria-hidden="true">
         <MiniDial spec={spec} className="size-full" />
       </div>
+      {overlay && <div className="absolute inset-0">{overlay(shown)}</div>}
       {numerals && shown && (
         <div aria-hidden="true">
           {shown.map((p, i) => (
@@ -303,10 +348,10 @@ export function Dial({ spec, size = 280, view = "hero", numerals = false, drawin
   );
 }
 
-// Seat numbers around the flat SVG dial: just outside the glass ring.
-function flatLabels(n: number) {
+// Seat labels around the flat SVG dial: just outside the glass ring, or further out by `k`.
+function flatLabels(n: number, k = 1) {
   return Array.from({ length: n }, (_, i) => {
     const a = -Math.PI / 2 + (i * 2 * Math.PI) / n;
-    return { x: 0.5 + 0.465 * Math.cos(a), y: 0.5 + 0.465 * Math.sin(a) };
+    return { x: 0.5 + 0.465 * k * Math.cos(a), y: 0.5 + 0.465 * k * Math.sin(a) };
   });
 }
