@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { useRouter } from "next/navigation";
 import { PublicKey } from "@solana/web3.js";
 import { useWallet } from "@solana/wallet-adapter-react";
@@ -21,6 +21,12 @@ const CODE_LENGTH = 8;
 // Joining pays rent for the member account (about 0.002 SOL) plus the fee.
 const JOIN_COST = 0.005;
 const normalizeCode = (raw: string) => raw.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, CODE_LENGTH);
+
+// A shared invite link (/join?code=…), read from the URL itself: useSearchParams would need a
+// Suspense boundary on a static page. The server render has no link.
+const subscribeNothing = () => () => {};
+const linkedCode = () => normalizeCode(new URLSearchParams(window.location.search).get("code") ?? "");
+const noLink = () => "";
 
 // Before a code: six seats, one lit at the pip, waiting for you.
 const WAITING_DIAL: DialSpec = { seats: 6, mode: "pending", open: [1, 2, 3, 4, 5], staked: [0], you: 0 };
@@ -56,9 +62,15 @@ export default function JoinPage() {
   const linkedOnce = useRef(false);
   const lookupSeq = useRef(0);
 
-  const [code, setCode] = useState("");
+  const linked = useSyncExternalStore(subscribeNothing, linkedCode, noLink);
+  // The boxes show the linked code until the user types
+  const [typed, setTyped] = useState<string | null>(null);
+  const code = typed ?? linked;
   const [pool, setPool] = useState<FetchedPool | null>(null);
-  const [searching, setSearching] = useState(false);
+  const [looking, setLooking] = useState(false);
+  // The link's own lookup, until it answers or another lookup takes over
+  const [linkAnswered, setLinkAnswered] = useState(false);
+  const searching = looking || (typed === null && linked.length === CODE_LENGTH && !linkAnswered);
   const [notFound, setNotFound] = useState(false);
   const [lookupFailed, setLookupFailed] = useState(false);
   // Find was tapped before all eight characters were in
@@ -76,56 +88,60 @@ export default function JoinPage() {
     if (pool) card.current?.focus();
   }, [pool]);
 
-  const lookup = async (value: string) => {
+  // A promise chain, not try/finally: the React Compiler skips components with a finally block
+  const lookup = (value: string) => {
     if (value.length !== CODE_LENGTH) return;
     const seq = ++lookupSeq.current;
-    setSearching(true);
+    // A slower, older lookup must not overwrite a newer one
+    const latest = () => seq === lookupSeq.current;
+    setLooking(true);
+    setLinkAnswered(true);
     setNotFound(false);
     setLookupFailed(false);
-    try {
-      const found = await getPoolByInviteCode(value);
-      if (seq !== lookupSeq.current) return;
-      setPool(found);
-      setNotFound(!found);
-    } catch (error) {
-      // An unreachable network is not the same as a wrong code
-      if (seq !== lookupSeq.current) return;
-      console.error("Invite lookup failed:", error);
-      setLookupFailed(true);
-    } finally {
-      if (seq === lookupSeq.current) setSearching(false);
-    }
+    getPoolByInviteCode(value).then(
+      (found) => {
+        if (!latest()) return;
+        setPool(found);
+        setNotFound(!found);
+        setLooking(false);
+      },
+      (error) => {
+        // An unreachable network is not the same as a wrong code
+        if (!latest()) return;
+        console.error("Invite lookup failed:", error);
+        setLookupFailed(true);
+        setLooking(false);
+      }
+    );
   };
 
-  // A shared invite link (/join?code=…) fills the boxes and looks the circle up, once.
-  // Read from the URL itself: useSearchParams would need a Suspense boundary on a static page.
+  // A linked code is looked up once. State only changes when the answer comes back.
   useEffect(() => {
-    if (linkedOnce.current) return;
+    if (linkedOnce.current || linked.length !== CODE_LENGTH) return;
     linkedOnce.current = true;
-    const linked = normalizeCode(new URLSearchParams(window.location.search).get("code") ?? "");
-    if (linked.length !== CODE_LENGTH) return;
-    setCode(linked);
-    setSearching(true);
-    getPoolByInviteCode(linked)
-      .then(
-        (found) => {
-          setPool(found);
-          setNotFound(!found);
-        },
-        (error) => {
-          console.error("Invite lookup failed:", error);
-          setLookupFailed(true);
-        }
-      )
-      .finally(() => setSearching(false));
-  }, [getPoolByInviteCode]);
+    const seq = ++lookupSeq.current;
+    getPoolByInviteCode(linked).then(
+      (found) => {
+        if (seq !== lookupSeq.current) return;
+        setPool(found);
+        setNotFound(!found);
+        setLinkAnswered(true);
+      },
+      (error) => {
+        if (seq !== lookupSeq.current) return;
+        console.error("Invite lookup failed:", error);
+        setLookupFailed(true);
+        setLinkAnswered(true);
+      }
+    );
+  }, [linked, getPoolByInviteCode]);
 
   // A complete code looks the circle up by itself, like any one-time code: the eighth
   // character, or a whole new code pasted over the last one
   const updateCode = (raw: string) => {
     const next = normalizeCode(raw);
     const completed = next.length === CODE_LENGTH && next !== code;
-    setCode(next);
+    setTyped(next);
     setPool(null);
     setNotFound(false);
     setLookupFailed(false);
