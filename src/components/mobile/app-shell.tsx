@@ -1,7 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
+import { introSeen, subscribeIntro } from "@/components/onboarding/intro-store";
 import { usePathname, useRouter } from "next/navigation";
 import { ThemeToggle } from "@/components/layout/theme-toggle";
 import { WalletChip } from "@/components/mobile/wallet-button";
@@ -29,6 +30,7 @@ interface AppShellProps {
 export function AppShell({ title, back, children }: AppShellProps) {
   const pathname = usePathname();
   const router = useRouter();
+  const introDone = useSyncExternalStore(subscribeIntro, introSeen, () => true);
   // A hairline under the header once content scrolls beneath it
   const [scrolled, setScrolled] = useState(false);
 
@@ -51,7 +53,8 @@ export function AppShell({ title, back, children }: AppShellProps) {
       <header
         className={cn(
           "sticky top-0 z-40 bg-background/95 pt-[env(safe-area-inset-top)] backdrop-blur-xl transition-shadow",
-          scrolled && "shadow-[inset_0_-1px_0_var(--border)]"
+          scrolled && "shadow-[inset_0_-1px_0_var(--border)]",
+          !introDone && "invisible pointer-events-none"
         )}
       >
         <div className="flex h-[60px] items-center gap-2 px-4">
@@ -83,10 +86,15 @@ export function AppShell({ title, back, children }: AppShellProps) {
       </header>
 
       <WalletModalA11y />
-      <main className="flex-1 overflow-x-clip px-4 pb-[calc(7rem+env(safe-area-inset-bottom))] pt-1">{children}</main>
+      <main className={cn("flex-1 overflow-x-clip px-4 pb-[calc(7rem+env(safe-area-inset-bottom))] pt-1", !introDone && "invisible")} aria-hidden={!introDone}>
+        {children}
+      </main>
 
       {/* A floating dock: Home and Join either side, Create as the gold coin in the middle */}
-      <nav className="pointer-events-none fixed inset-x-0 bottom-0 z-40 mx-auto w-full max-w-[480px] px-4 pb-[calc(10px+env(safe-area-inset-bottom))]">
+      <nav
+        hidden={!introDone}
+        className="pointer-events-none fixed inset-x-0 bottom-0 z-40 mx-auto w-full max-w-[480px] px-4 pb-[calc(10px+env(safe-area-inset-bottom))]"
+      >
         <ul className="bz-dock pointer-events-auto">
           {NAV.map(({ href, label, icon }) => {
             // A circle's own page belongs to Home: that's where its card lives.

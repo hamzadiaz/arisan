@@ -1082,6 +1082,7 @@
 @layer components {
   /* First-visit intro: a card on the app's own page, the dial and its people inside */
   .bz-intro {
+    z-index: 60;
     background: var(--background);
   }
 
@@ -1128,10 +1129,6 @@
     letter-spacing: -0.035em;
     text-wrap: balance;
     color: var(--gold-hi);
-    background: var(--intro-title);
-    -webkit-background-clip: text;
-    background-clip: text;
-    -webkit-text-fill-color: transparent;
   }
 
   .bz-intro-next,
@@ -1411,6 +1408,7 @@
    ============================================ */
 
 .wallet-adapter-modal-container {
+  z-index: 70;
   align-items: flex-end;
   margin: 0;
   min-height: 100dvh;
