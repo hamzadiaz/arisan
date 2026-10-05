@@ -1120,12 +1120,12 @@
     background: var(--gold);
   }
 
+  /* The app's own Chivo, at its heaviest, in gold */
   .bz-intro-title {
-    font-family: var(--font-display), Georgia, serif;
     font-size: 36px;
     line-height: 1.04;
     font-weight: 800;
-    letter-spacing: -0.012em;
+    letter-spacing: -0.035em;
     text-wrap: balance;
     color: var(--gold-hi);
     background: var(--intro-title);
