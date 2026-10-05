@@ -239,8 +239,8 @@ fn advance_round(pool: &mut Pool, now: i64, left_to_win: usize) -> Result<bool> 
             .current_round
             .checked_add(1)
             .ok_or(ArisanError::Overflow)?;
-        // DEVNET: 5 minutes. MAINNET: 2_592_000 (30 days).
-        const DRAW_INTERVAL: i64 = 300;
+        // DEVNET: 1 minute. MAINNET: 2_592_000 (30 days).
+        const DRAW_INTERVAL: i64 = 60;
         pool.next_draw_timestamp = now
             .checked_add(DRAW_INTERVAL)
             .ok_or(ArisanError::Overflow)?;

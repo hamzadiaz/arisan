@@ -101,8 +101,8 @@ pub fn handler(ctx: Context<ClaimWinnings>) -> Result<()> {
             .ok_or(ArisanError::Overflow)?;
 
         // Set next draw timestamp
-        // DEVNET: 5 minutes for testing | MAINNET: Change to 2_592_000 (30 days)
-        const DRAW_INTERVAL: i64 = 300; // 5 minutes
+        // DEVNET: 1 minute for testing | MAINNET: Change to 2_592_000 (30 days)
+        const DRAW_INTERVAL: i64 = 60;
         pool.next_draw_timestamp = clock.unix_timestamp.checked_add(DRAW_INTERVAL)
             .ok_or(ArisanError::Overflow)?;
     } else {

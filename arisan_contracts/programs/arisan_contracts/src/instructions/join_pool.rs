@@ -138,8 +138,8 @@ pub fn handler(
         pool.status = PoolStatus::Active;
         pool.current_round = 1;
 
-        // Set next draw timestamp (5 minutes for devnet testing)
-        const DRAW_INTERVAL: i64 = 300; // 5 minutes for devnet
+        // Set next draw timestamp (1 minute for devnet testing)
+        const DRAW_INTERVAL: i64 = 60;
         pool.next_draw_timestamp = clock.unix_timestamp.checked_add(DRAW_INTERVAL)
             .ok_or(ArisanError::Overflow)?;
 

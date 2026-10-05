@@ -44,10 +44,8 @@ pub fn handler(ctx: Context<StartPool>) -> Result<()> {
     pool.current_round = 1;
 
     // Set next draw timestamp
-    // DEVNET: 5 minutes for testing (300 seconds)
-    // MAINNET: Change to 30 days (2,592,000 seconds) before production
-    const DRAW_INTERVAL: i64 = 300; // 5 minutes for devnet testing
-                                    // const DRAW_INTERVAL: i64 = 2_592_000; // 30 days for mainnet
+    // DEVNET: 1 minute for testing (60 seconds)
+    const DRAW_INTERVAL: i64 = 60;
     pool.next_draw_timestamp = clock
         .unix_timestamp
         .checked_add(DRAW_INTERVAL)

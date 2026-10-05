@@ -179,7 +179,7 @@ function CreateForm({ onCreated }: { onCreated: (c: Created) => void }) {
         </div>
       </div>
       <p className={tooSmall ? "bz-help bz-help-signal" : "bz-help"}>
-        {tooSmall ? "The smallest round is 0.001 SOL." : "Rounds last 5 minutes on devnet."}
+        {tooSmall ? "The smallest round is 0.001 SOL." : "Rounds last 1 minute on devnet."}
       </p>
 
       {/* The main button stays above the tab bar on short screens */}

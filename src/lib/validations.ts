@@ -48,13 +48,13 @@ export const createPoolSchema = z.object({
     .number()
     .int()
     .min(2, "Pool must have at least 2 members")
-    .max(50, "Pool cannot have more than 50 members"),
+    .max(20, "Pool cannot have more than 20 members"),
   contributionAmount: amountSchema,
   totalRounds: z
     .number()
     .int()
     .min(2, "Pool must have at least 2 rounds")
-    .max(50, "Pool cannot have more than 50 rounds"),
+    .max(20, "Pool cannot have more than 20 rounds"),
   currency: z.enum(["SOL", "USDC"]),
   stakeEnabled: z.boolean().optional().default(false),
   stakeMultiplier: z.number().min(1).max(10).optional().default(2),
