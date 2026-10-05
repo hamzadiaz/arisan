@@ -1,5 +1,5 @@
 import { test, expect, type Page } from "@playwright/test";
-import { PublicKey } from "@solana/web3.js";
+import { PublicKey, Transaction } from "@solana/web3.js";
 import {
   MOCK_POOL,
   MOCK_WALLET,
@@ -260,6 +260,17 @@ test.describe("Draw, missed payments and refunds", () => {
     await openPool(page, { ...due([staked(me), staked(other)], [me, other]), nextDrawIn: 3_600 });
     await expect(main(page).getByRole("button", { name: "Draw now" })).toHaveCount(0);
     await expect(main(page).getByRole("button", { name: "Paid for round 1" })).toBeDisabled();
+  });
+
+  // From 13 seats the finish names too many accounts for a legacy transaction: the member
+  // accounts go in a lookup table, made in the same approval as the commit
+  test("a big circle's draw makes its lookup table with the commit", async ({ page }) => {
+    const seats = [staked(me), ...Array.from({ length: 12 }, (_, i) => staked(new PublicKey(Buffer.alloc(32, i + 1))))];
+    await openPool(page, due(seats, seats.map((s) => s.wallet)));
+    await expectSigned(page, "Draw now", /^commit_?[dD]raw_?[rR]andomness$/);
+    const raw = await page.evaluate(() => (window as unknown as { __e2eSignRequests?: number[][] }).__e2eSignRequests ?? []);
+    const programs = Transaction.from(Buffer.from(raw[0])).instructions.map((ix) => ix.programId.toBase58());
+    expect(programs.filter((id) => id === "AddressLookupTab1e1111111111111111111111111")).toHaveLength(2);
   });
 
   test("a half-done draw is finished with one approval, without a new commit", async ({ page }) => {

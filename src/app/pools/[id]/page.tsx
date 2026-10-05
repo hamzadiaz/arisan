@@ -29,7 +29,7 @@ interface PoolData {
   draws: FetchedDraw[];
 }
 
-type TxResult = { success: boolean; signature?: string; error?: string; committed?: boolean; stage?: "committed" | "drawn" };
+type TxResult = { success: boolean; signature?: string; error?: string; committed?: boolean; stage?: "committed" | "drawn" | "prepared" };
 
 /** Fees, a Payment or Draw account's rent, and a possible vault top-up */
 const FEE_MARGIN = 0.003;
@@ -45,6 +45,7 @@ function drawError(message?: string, committed?: boolean) {
   if (message === DRAW_ERROR.noWinner) return "No seat can win this round.";
   if (message === DRAW_ERROR.vaultShort) return "The vault can’t cover this pot without spending stakes.";
   if (message === DRAW_ERROR.expired) return "The draw wasn’t finished within 3 minutes. This circle is locked until the program is fixed.";
+  if (message === DRAW_ERROR.tooBig) return "This circle is too big to draw in one transaction.";
   if (message === DRAW_ERROR.unpaid)
     return committed
       ? "Not every seat has paid. The draw finishes once they do, within 3 minutes."
@@ -328,7 +329,12 @@ export default function PoolPage({ params }: { params: Promise<{ id: string }> }
         if ((result.success && result.stage === "drawn") || result.error === DRAW_ERROR.alreadyDrawn) setDrawnRound(round);
         return result;
       },
-      (sig, result) => (result.stage === "drawn" ? poolToasts.drawn(sig, round) : poolToasts.drawStarted(sig)),
+      (sig, result) =>
+        result.stage === "drawn"
+          ? poolToasts.drawn(sig, round)
+          : result.stage === "prepared"
+            ? poolToasts.drawPrepared(sig)
+            : poolToasts.drawStarted(sig),
       drawError
     );
     setDrawing(false);

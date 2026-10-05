@@ -5,11 +5,32 @@
  * Used by the Vercel cron job to trigger draws without user intervention.
  */
 
-import { ComputeBudgetProgram, Connection, Keypair, PublicKey, SystemProgram, Transaction, VersionedTransaction, sendAndConfirmTransaction } from "@solana/web3.js";
+import {
+  type AddressLookupTableAccount,
+  ComputeBudgetProgram,
+  Connection,
+  Keypair,
+  PublicKey,
+  SystemProgram,
+  Transaction,
+  type TransactionInstruction,
+  TransactionMessage,
+  VersionedTransaction,
+  sendAndConfirmTransaction,
+} from "@solana/web3.js";
 import { Program, AnchorProvider } from "@coral-xyz/anchor";
 import { getProgram, OnChainPool, OnChainMember, getPoolStatusString, getDrawPDA, getVaultPDA, getMemberPDA, getPaymentPDA } from "./program";
 import { SLOT_HASHES_SYSVAR, isDrawEligible, readSlotHash, selectDerivedWinner } from "./bound-draw";
 import { settleRound } from "./round-settlement";
+import {
+  TX_LIMIT,
+  drawTableInstructions,
+  findDrawTable,
+  legacySize,
+  plannedTable,
+  rememberDrawTable,
+  versionedSize,
+} from "./draw-table";
 import bs58 from "bs58";
 
 // Wallet interface compatible with AnchorProvider
@@ -296,6 +317,23 @@ async function sendSchedulerTx(
   return sendAndConfirmTransaction(connection, tx, [keypair], { commitment: "confirmed" });
 }
 
+/** A v0 transaction for a big circle's finish, which only fits with a lookup table. */
+async function sendSchedulerV0(
+  connection: Connection,
+  keypair: Keypair,
+  instructions: TransactionInstruction[],
+  tables: AddressLookupTableAccount[]
+): Promise<string> {
+  const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash();
+  const message = new TransactionMessage({ payerKey: keypair.publicKey, recentBlockhash: blockhash, instructions }).compileToV0Message(tables);
+  const tx = new VersionedTransaction(message);
+  tx.sign([keypair]);
+  const signature = await connection.sendRawTransaction(tx.serialize());
+  const confirmation = await connection.confirmTransaction({ signature, blockhash, lastValidBlockHeight }, "confirmed");
+  if (confirmation.value.err) throw new Error(`Transaction failed on-chain: ${JSON.stringify(confirmation.value.err)}`);
+  return signature;
+}
+
 /**
  * Commit the draw slot, then pay the member derived from that slot's hash.
  * The scheduler does not choose the winner.
@@ -428,6 +466,30 @@ export async function executeDraw(
       return { balance, pot, ok: balance - pot >= owed, covers: balance >= pot };
     };
 
+    const paymentAccounts = roster.map((wallet) => getPaymentPDA(poolAddress, wallet, round)[0]);
+    // The finish: a bigger compute budget, a vault top-up against dust, then execute_draw
+    const finishInstructions = async (winner: PublicKey, topUp: number) => {
+      const executeTx = await program.methods
+        .executeDraw()
+        .accounts({
+          authority: keypair.publicKey,
+          pool: poolAddress,
+          winnerWallet: winner,
+          draw: getDrawPDA(poolAddress, round)[0],
+          vault: vaultPDA,
+          systemProgram: SystemProgram.programId,
+          slotHashes: SLOT_HASHES_SYSVAR,
+        })
+        .remainingAccounts([
+          ...memberAccounts.map((pubkey) => ({ pubkey, isWritable: true, isSigner: false })),
+          ...paymentAccounts.map((pubkey) => ({ pubkey, isWritable: false, isSigner: false })),
+        ])
+        .transaction();
+      const before: TransactionInstruction[] = [ComputeBudgetProgram.setComputeUnitLimit({ units: DRAW_COMPUTE_UNITS })];
+      if (topUp > 0) before.push(SystemProgram.transfer({ fromPubkey: keypair.publicKey, toPubkey: vaultPDA, lamports: topUp }));
+      return [...before, ...executeTx.instructions];
+    };
+
     if (poolAccount.randomnessRound !== round) {
       // The pot must come from this round's payments and slashed stakes, never stakes owed back
       if (!(await vaultFor()).ok) return skip("Vault can't cover the pot without spending stakes");
@@ -438,7 +500,20 @@ export async function executeDraw(
           pool: poolAddress,
         })
         .transaction();
-      await sendSchedulerTx(connection, keypair, commitTx);
+      // From 13 seats the finish only fits with the member accounts in a lookup table, made in
+      // the commit's own transaction. A finish that can't fit even so is never committed.
+      const planned = await finishInstructions((await eligibleNow())[0], RENT_EXEMPT_EMPTY);
+      if (legacySize(planned, keypair.publicKey) > TX_LIMIT) {
+        if (versionedSize(planned, keypair.publicKey, [plannedTable(keypair.publicKey, memberAccounts)]) > TX_LIMIT) {
+          return skip("Circle too big to finish a draw in one transaction");
+        }
+        const made = await drawTableInstructions(connection, keypair.publicKey, memberAccounts);
+        commitTx.add(...made.instructions);
+        await sendSchedulerTx(connection, keypair, commitTx);
+        rememberDrawTable(poolAddress, round, made.table);
+      } else {
+        await sendSchedulerTx(connection, keypair, commitTx);
+      }
       poolAccount = await accounts.pool.fetch(poolAddress);
       // The commit takes no round: if it landed on another one, leave it for that round's run
       if (!("active" in poolAccount.status) || poolAccount.currentRound !== round || poolAccount.randomnessRound !== round) {
@@ -468,44 +543,29 @@ export async function executeDraw(
 
     const eligible = await eligibleNow();
     const derivedWinner = selectDerivedWinner(hash, eligible);
-    const [drawPDA] = getDrawPDA(poolAddress, round);
     // Once committed, finishing is the only way to keep the circle going: only require the pot
     const vault = await vaultFor();
     if (!vault.covers) throw new Error("Vault can't cover the pot");
-    const executeTx = await program.methods
-      .executeDraw()
-      .accounts({
-        authority: keypair.publicKey,
-        pool: poolAddress,
-        winnerWallet: derivedWinner,
-        draw: drawPDA,
-        vault: vaultPDA,
-        systemProgram: SystemProgram.programId,
-        slotHashes: SLOT_HASHES_SYSVAR,
-      })
-      .remainingAccounts([
-        ...memberAccounts.map((pubkey) => ({
-          pubkey,
-          isWritable: true,
-          isSigner: false,
-        })),
-        ...roster.map((wallet) => ({
-          pubkey: getPaymentPDA(poolAddress, wallet, round)[0],
-          isWritable: false,
-          isSigner: false,
-        })),
-      ])
-      .transaction();
-    const before = [ComputeBudgetProgram.setComputeUnitLimit({ units: DRAW_COMPUTE_UNITS })];
     const left = vault.balance - vault.pot;
-    if (left > BigInt(0) && left < BigInt(RENT_EXEMPT_EMPTY)) {
-      // Dust in the vault would leave it below rent after the payout
-      before.push(
-        SystemProgram.transfer({ fromPubkey: keypair.publicKey, toPubkey: vaultPDA, lamports: RENT_EXEMPT_EMPTY - Number(left) })
-      );
+    const topUp = left > BigInt(0) && left < BigInt(RENT_EXEMPT_EMPTY) ? RENT_EXEMPT_EMPTY - Number(left) : 0;
+    const instructions = await finishInstructions(derivedWinner, topUp);
+    let signature: string;
+    if (legacySize(instructions, keypair.publicKey) <= TX_LIMIT) {
+      signature = await sendSchedulerTx(connection, keypair, new Transaction().add(...instructions));
+    } else {
+      let table = await findDrawTable(connection, poolAddress, round, memberAccounts);
+      if (!table) {
+        // Started without its table (by an older app): make one, and use it once it's live
+        const made = await drawTableInstructions(connection, keypair.publicKey, memberAccounts);
+        await sendSchedulerTx(connection, keypair, new Transaction().add(...made.instructions));
+        rememberDrawTable(poolAddress, round, made.table);
+        const madeAt = await connection.getSlot("confirmed");
+        while ((await connection.getSlot("confirmed")) <= madeAt) await new Promise((resolve) => setTimeout(resolve, 400));
+        table = await findDrawTable(connection, poolAddress, round, memberAccounts);
+        if (!table) throw new Error("The draw's lookup table isn't usable");
+      }
+      signature = await sendSchedulerV0(connection, keypair, instructions, [table]);
     }
-    executeTx.instructions.unshift(...before);
-    const signature = await sendSchedulerTx(connection, keypair, executeTx);
 
     return {
       poolAddress: poolAddress.toBase58(),

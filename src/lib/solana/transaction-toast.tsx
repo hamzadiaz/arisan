@@ -104,6 +104,7 @@ export const poolToasts = {
   drawStarted: (signature: string) => done("Draw started", signature, "Now finish it: one more approval", 8000),
   finishing: () => confirming("Finish the draw"),
   drawn: (signature: string, round: number) => done(`Round ${round} drawn`, signature, undefined, 6000),
+  drawPrepared: (signature: string) => done("Ready to finish", signature, "Tap Finish the draw once more", 8000),
 
   marking: () => confirming("Mark missed payments"),
   marked: (signature: string, count: number, removed: number) =>

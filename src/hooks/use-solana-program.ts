@@ -3,7 +3,16 @@
 import { useMemo, useCallback, useState } from "react";
 import { useConnection, useWallet } from "@solana/wallet-adapter-react";
 import { Program, AnchorProvider, BN } from "@coral-xyz/anchor";
-import { ComputeBudgetProgram, PublicKey, SystemProgram, Transaction } from "@solana/web3.js";
+import {
+  type AddressLookupTableAccount,
+  ComputeBudgetProgram,
+  PublicKey,
+  SystemProgram,
+  Transaction,
+  type TransactionInstruction,
+  TransactionMessage,
+  VersionedTransaction,
+} from "@solana/web3.js";
 import {
   createProvider,
   getProgram,
@@ -19,6 +28,15 @@ import {
   selectDerivedWinner,
 } from "@/lib/solana/bound-draw";
 import { useWalletMode } from "@/hooks/use-wallet-mode";
+import {
+  TX_LIMIT,
+  drawTableInstructions,
+  findDrawTable,
+  legacySize,
+  plannedTable,
+  rememberDrawTable,
+  versionedSize,
+} from "@/lib/solana/draw-table";
 import {
   buildCreatePoolTransaction,
   buildJoinPoolTransaction,
@@ -69,6 +87,7 @@ export const DRAW_ERROR = {
   expired: "draw:expired",
   notReady: "draw:not-ready",
   unpaid: "draw:unpaid",
+  tooBig: "draw:too-big",
 } as const;
 
 /** SlotHashes keeps the last 512 slots; a commit older than that can't be drawn. */
@@ -252,6 +271,30 @@ export function useSolanaPoolActions() {
       }
     },
     [connection, wallet, walletAddress, isCustodial, sendCustodialTransaction]
+  );
+
+  // A v0 transaction, for instructions that only fit with address lookup tables (a big circle's
+  // draw). The wallet adapter signs and sends it like a legacy one.
+  const sendVersionedHelper = useCallback(
+    async (instructions: TransactionInstruction[], tables: AddressLookupTableAccount[]): Promise<TransactionResult> => {
+      if (!walletAddress || isCustodial || !wallet.sendTransaction) {
+        return { success: false, error: "Wallet not connected" };
+      }
+      try {
+        const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash();
+        const message = new TransactionMessage({ payerKey: walletAddress, recentBlockhash: blockhash, instructions }).compileToV0Message(tables);
+        const signature = await wallet.sendTransaction(new VersionedTransaction(message), connection);
+        const confirmation = await connection.confirmTransaction({ signature, blockhash, lastValidBlockHeight });
+        if (confirmation.value.err) {
+          return { success: false, signature, error: `Transaction failed on-chain: ${JSON.stringify(confirmation.value.err)}` };
+        }
+        return { success: true, signature, explorerLink: getExplorerLink(signature, "devnet") };
+      } catch (err: any) {
+        console.error("Transaction failed:", err);
+        return { success: false, error: err.message || "Transaction failed" };
+      }
+    },
+    [connection, wallet, walletAddress, isCustodial]
   );
 
   // A vault left between zero and rent-exempt makes the payout fail (someone can send it dust).
@@ -541,7 +584,7 @@ export function useSolanaPoolActions() {
     // The hook derives the winner and the member accounts itself; callers give pool and round.
     async (
       params: Pick<ExecuteDrawParams, "poolAddress" | "round">
-    ): Promise<TransactionResult & { committed?: boolean; stage?: "committed" | "drawn" }> => {
+    ): Promise<TransactionResult & { committed?: boolean; stage?: "committed" | "drawn" | "prepared" }> => {
       if (!program || !walletAddress) {
         return { success: false, error: "Program not initialized" };
       }
@@ -596,6 +639,21 @@ export function useSolanaPoolActions() {
             (info, i) => members[i]?.isKicked || (!!info && info.owner.equals(program.programId) && info.data.length > 0)
           );
         };
+        const paymentAccounts = roster.map((wallet) => getPaymentPDA(params.poolAddress, wallet, params.round)[0]);
+        // The finish: a bigger compute budget (twenty seats can pass the 200k default), a vault
+        // top-up when dust would leave it between zero and rent-exempt, then execute_draw.
+        const finishInstructions = async (winner: PublicKey, topUp: number) => {
+          const execute = await buildExecuteDrawTransaction(program, walletAddress, {
+            poolAddress: params.poolAddress,
+            round: params.round,
+            derivedWinner: winner,
+            memberAccounts,
+            paymentAccounts,
+          });
+          const before: TransactionInstruction[] = [ComputeBudgetProgram.setComputeUnitLimit({ units: DRAW_COMPUTE_UNITS })];
+          if (topUp > 0) before.push(SystemProgram.transfer({ fromPubkey: walletAddress, toPubkey: vaultPDA, lamports: topUp }));
+          return [...before, ...execute.instructions];
+        };
         // The vault pays contribution × member_count and must still hold every stake owed back.
         const vaultFor = async (members: any[]) => {
           const balance = BigInt(await connection.getBalance(vaultPDA, "confirmed"));
@@ -625,6 +683,18 @@ export function useSolanaPoolActions() {
             walletAddress,
             params.poolAddress
           );
+          // From 13 seats the finish only fits with the member accounts in a lookup table: make
+          // it in this same approval. A finish that can't fit even so must never be committed.
+          const planned = await finishInstructions(eligibleOf(members)[0], RENT_EXEMPT_EMPTY);
+          let table: PublicKey | null = null;
+          if (legacySize(planned, walletAddress) > TX_LIMIT) {
+            if (versionedSize(planned, walletAddress, [plannedTable(walletAddress, memberAccounts)]) > TX_LIMIT) {
+              return { success: false, error: DRAW_ERROR.tooBig };
+            }
+            const made = await drawTableInstructions(connection, walletAddress, memberAccounts);
+            commitTx.add(...made.instructions);
+            table = made.table;
+          }
           // Sign, look again, then send: the commit takes no round, so it must not go out
           // if the round moved or someone started this draw while the wallet was open.
           const result = await sendTransactionHelper(commitTx, "commit_draw_randomness", false, async () => {
@@ -637,6 +707,7 @@ export function useSolanaPoolActions() {
             setError(result.error || "Failed to start the draw");
             return result;
           }
+          if (table) rememberDrawTable(params.poolAddress, params.round, table);
           poolAccount = await accounts.pool.fetch(params.poolAddress);
           if (!sameRound(poolAccount) || poolAccount.randomnessRound !== params.round) {
             return { success: false, error: DRAW_ERROR.roundMoved, signature: result.signature };
@@ -681,24 +752,24 @@ export function useSolanaPoolActions() {
           return { success: false, error: DRAW_ERROR.vaultShort, committed };
         }
 
-        const transaction = await buildExecuteDrawTransaction(program, walletAddress, {
-          poolAddress: params.poolAddress,
-          round: params.round,
-          derivedWinner: selectDerivedWinner(hash, eligible),
-          memberAccounts,
-          paymentAccounts: roster.map((wallet) => getPaymentPDA(params.poolAddress, wallet, params.round)[0]),
-        });
-        // Twenty seats can outgrow the default compute budget, and dust in the vault must
-        // not leave it between zero and rent-exempt after the payout.
-        const before = [ComputeBudgetProgram.setComputeUnitLimit({ units: DRAW_COMPUTE_UNITS })];
         const left = vault.balance - vault.pot;
-        if (left > BigInt(0) && left < BigInt(RENT_EXEMPT_EMPTY)) {
-          before.push(
-            SystemProgram.transfer({ fromPubkey: walletAddress, toPubkey: vaultPDA, lamports: RENT_EXEMPT_EMPTY - Number(left) })
-          );
+        const topUp = left > BigInt(0) && left < BigInt(RENT_EXEMPT_EMPTY) ? RENT_EXEMPT_EMPTY - Number(left) : 0;
+        const instructions = await finishInstructions(selectDerivedWinner(hash, eligible), topUp);
+        let result: TransactionResult;
+        if (legacySize(instructions, walletAddress) <= TX_LIMIT) {
+          result = await sendTransactionHelper(new Transaction().add(...instructions), "execute_draw");
+        } else {
+          const table = await findDrawTable(connection, params.poolAddress, params.round, memberAccounts);
+          if (!table) {
+            // Started without its table (by an older app): make one now and finish on the next
+            // tap. A second wallet prompt without a tap can be blocked on Android.
+            const made = await drawTableInstructions(connection, walletAddress, memberAccounts);
+            const prepared = await sendTransactionHelper(new Transaction().add(...made.instructions), "draw_table");
+            if (prepared.success) rememberDrawTable(params.poolAddress, params.round, made.table);
+            return { ...prepared, committed, stage: "prepared" };
+          }
+          result = await sendVersionedHelper(instructions, [table]);
         }
-        transaction.instructions.unshift(...before);
-        const result = await sendTransactionHelper(transaction, "execute_draw");
         if (!result.success) {
           setError(result.error || "Failed to execute draw");
           // Someone else's execute created this round's Draw account first
@@ -716,7 +787,7 @@ export function useSolanaPoolActions() {
         setIsLoading(false);
       }
     },
-    [program, walletAddress, sendTransactionHelper, connection]
+    [program, walletAddress, sendTransactionHelper, sendVersionedHelper, connection]
   );
 
   // Mark members who missed the current round. One approval for up to MARK_BATCH seats.
