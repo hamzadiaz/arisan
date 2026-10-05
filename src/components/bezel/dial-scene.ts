@@ -41,6 +41,8 @@ import { EMBLEM_FULL, emblemSegments } from "./emblem";
 // element while it's on screen. It draws only when something changes.
 
 const TAU = Math.PI * 2;
+/** A shader compile slower than this is left to finish on first draw */
+const COMPILE_LIMIT_MS = 8000;
 const clamp01 = (v: number) => Math.min(1, Math.max(0, v));
 const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
 const smooth = (a: number, b: number, x: number) => {
@@ -298,6 +300,8 @@ class DialEngine {
   private ready = false;
   /** Latest spec waiting for the queue: a ruler drag collapses into one transition. */
   private pending: DialSpec | null = null;
+  /** Meshes a rebuild dropped mid-compile: three's compile check reads their materials until it ends */
+  private trash: Mesh[] = [];
   private owner: DialOwner | null = null;
   private themeApplied: Theme | null = null;
   /** The shader compile in flight: a lost context must not dispose the renderer under it */
@@ -533,12 +537,26 @@ class DialEngine {
     }
     warmers.scale.setScalar(1e-4);
     this.scene.add(warmers);
-    // An optimisation only: a failed compile (even a synchronous throw) still settles
-    await Promise.resolve()
+    // An optimisation only: a failed compile (even a synchronous throw) still settles, and one
+    // that never reports back can't hold the dial in its SVG for good
+    const compiled = Promise.resolve()
       .then(() => this.renderer.compileAsync(this.scene, this.camera))
-      .catch(() => undefined);
+      .then(
+        () => true,
+        () => true
+      );
+    const done = await Promise.race([compiled, new Promise<boolean>((resolve) => setTimeout(() => resolve(false), COMPILE_LIMIT_MS))]);
     this.scene.remove(warmers);
     this.compiling = null;
+    // Free what a rebuild dropped once three has stopped checking it
+    const flush = () => {
+      for (const mesh of this.trash.splice(0)) {
+        mesh.geometry.dispose();
+        (mesh.material as Material).dispose();
+      }
+    };
+    if (done) flush();
+    else void compiled.then(flush);
     if (!this.lost) this.ready = true;
   }
 
@@ -764,7 +782,10 @@ class DialEngine {
   private build(grow: boolean | number[] = false) {
     this.dial.traverse((o) => {
       const mesh = o as Mesh;
-      if (mesh.userData?.own) {
+      if (!mesh.userData?.own) return;
+      // A dial attaching mid-compile rebuilds; three would read the freed material and throw
+      if (this.compiling) this.trash.push(mesh);
+      else {
         mesh.geometry.dispose();
         (mesh.material as Material).dispose();
       }

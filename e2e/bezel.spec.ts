@@ -1,5 +1,6 @@
 import { test, expect } from "@playwright/test";
-import { MOCK_POOL, gotoReady, mockRpcWithPool } from "./helpers";
+import { PublicKey } from "@solana/web3.js";
+import { MOCK_POOL, MOCK_WALLET, RPC_URL, gotoReady, installMockWallet, mockRpcWithPool } from "./helpers";
 
 // The Bezel dial and the circle screen's tabs.
 
@@ -28,6 +29,51 @@ test.describe("Dial", () => {
     await expect(dial).toHaveAttribute("data-dial", "svg");
     await expect(dial.locator("svg").first()).toBeVisible();
     await expect(dial.locator("canvas")).toHaveCount(0);
+  });
+
+  // Signing in swaps Home's dial (loading, then the next circle) while the first shader compile
+  // can still be running. That rebuild used to free materials three was still checking: the
+  // compile threw, never finished, and Home kept its flat dial for the whole visit.
+  test("a signed-in Home reaches the 3D dial when its dial changes mid-compile", async ({ page }) => {
+    test.setTimeout(120_000);
+    const errors: string[] = [];
+    page.on("pageerror", (e) => errors.push(e.message));
+    await installMockWallet(page);
+    await mockRpcWithPool(page, {
+      status: "Active",
+      currentRound: 1,
+      members: [
+        { wallet: new PublicKey(MOCK_WALLET.address), stakeDeposited: true },
+        { wallet: new PublicKey("Fr1ends1111111111111111111111111111111111111"), stakeDeposited: true },
+      ],
+    });
+    // Real GPUs compile shaders in the background (KHR_parallel_shader_compile); software GL in CI
+    // finishes at once and hides the race. Report the extension and keep programs "compiling" for
+    // the first few seconds, as a phone does.
+    await page.addInitScript(() => {
+      const COMPLETION_STATUS = 0x91b1;
+      const loaded = Date.now();
+      const gl = WebGL2RenderingContext.prototype;
+      const getExtension = gl.getExtension;
+      gl.getExtension = function (this: WebGL2RenderingContext, name: string) {
+        return name === "KHR_parallel_shader_compile" ? { COMPLETION_STATUS_KHR: COMPLETION_STATUS } : getExtension.call(this, name);
+      } as typeof gl.getExtension;
+      const getProgramParameter = gl.getProgramParameter;
+      gl.getProgramParameter = function (this: WebGL2RenderingContext, program: WebGLProgram, pname: number) {
+        return pname === COMPLETION_STATUS ? Date.now() - loaded > 6000 : getProgramParameter.call(this, program, pname);
+      };
+    });
+    // A returning user: the wallet reconnects on load, and the circle list takes a moment, as on a
+    // real chain: the loading dial starts the compile, then the next circle's dial takes over
+    await page.addInitScript((name) => localStorage.setItem("walletName", JSON.stringify(name)), MOCK_WALLET.name);
+    await page.route(RPC_URL, async (route) => {
+      if (route.request().postDataJSON()?.method === "getProgramAccounts") await new Promise((r) => setTimeout(r, 2500));
+      await route.fallback();
+    });
+    await gotoReady(page, "/?dial=3d");
+    await expect(page.getByText("0/2 paid this round")).toBeVisible();
+    await expect(page.locator("main [data-dial]")).toHaveAttribute("data-dial", "webgl", { timeout: 90_000 });
+    expect(errors).toEqual([]);
   });
 
   test("?dial=3d forces the Three.js dial and it draws", async ({ page }) => {
