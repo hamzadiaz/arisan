@@ -174,7 +174,11 @@ async fn create_pool(
     let invite = String::from_utf8(invite_bytes).unwrap();
     assert_eq!(invite.len(), 8, "invite code is 8 chars");
     assert_invite_not_logged(&result, &invite);
-    PoolFixture { pool, vault, invite }
+    PoolFixture {
+        pool,
+        vault,
+        invite,
+    }
 }
 
 /// The invite code must only travel in return data: not in any log line, and not
@@ -253,16 +257,31 @@ async fn deposit_stake(context: &mut ProgramTestContext, fixture: &PoolFixture, 
     assert_ok(&result, "deposit_stake");
 }
 
-async fn start_pool(context: &mut ProgramTestContext, fixture: &PoolFixture) {
-    let ix = Instruction {
+fn start_ix(authority: Pubkey, fixture: &PoolFixture, member_wallets: &[Pubkey]) -> Instruction {
+    let mut accounts = arisan_contracts::accounts::StartPool {
+        authority,
+        pool: fixture.pool,
+    }
+    .to_account_metas(None);
+    for wallet in member_wallets {
+        accounts.push(AccountMeta::new_readonly(
+            pda(&[b"member", fixture.pool.as_ref(), wallet.as_ref()]),
+            false,
+        ));
+    }
+    Instruction {
         program_id: arisan_contracts::ID,
-        accounts: arisan_contracts::accounts::StartPool {
-            authority: context.payer.pubkey(),
-            pool: fixture.pool,
-        }
-        .to_account_metas(None),
+        accounts,
         data: arisan_contracts::instruction::StartPool {}.data(),
-    };
+    }
+}
+
+async fn start_pool(
+    context: &mut ProgramTestContext,
+    fixture: &PoolFixture,
+    member_wallets: &[Pubkey],
+) {
+    let ix = start_ix(context.payer.pubkey(), fixture, member_wallets);
     assert_ok(&send(context, &[ix], &[]).await, "start_pool");
 }
 
@@ -375,7 +394,7 @@ async fn malicious_caller_cannot_choose_winner_and_vault_pays_derived_member() {
     let payer = context.payer.insecure_clone();
     join(&mut context, &fixture, &payer).await;
     join(&mut context, &fixture, &member2).await;
-    start_pool(&mut context, &fixture).await;
+    start_pool(&mut context, &fixture, &[payer.pubkey(), member2.pubkey()]).await;
     pay(&mut context, &fixture, &payer, 1).await;
     pay(&mut context, &fixture, &member2, 1).await;
 
@@ -395,7 +414,11 @@ async fn malicious_caller_cannot_choose_winner_and_vault_pays_derived_member() {
     };
 
     let member_pdas = [
-        pda(&[b"member", fixture.pool.as_ref(), context.payer.pubkey().as_ref()]),
+        pda(&[
+            b"member",
+            fixture.pool.as_ref(),
+            context.payer.pubkey().as_ref(),
+        ]),
         pda(&[b"member", fixture.pool.as_ref(), member2.pubkey().as_ref()]),
     ];
     // Reverse the roster order. Selection must ignore account order.
@@ -426,14 +449,19 @@ async fn malicious_caller_cannot_choose_winner_and_vault_pays_derived_member() {
 
     let expected = CONTRIB * 2;
     let vault_after = lamports(&mut context, fixture.vault).await;
-    assert_eq!(vault_before - vault_after, expected, "vault pays contribution * member_count");
+    assert_eq!(
+        vault_before - vault_after,
+        expected,
+        "vault pays contribution * member_count"
+    );
 
     let winner_after = lamports(&mut context, derived).await;
     if derived != context.payer.pubkey() {
         assert_eq!(winner_after - winner_before, expected);
     }
 
-    let draw = load_draw(&account_data(&mut context, pda(&[b"draw", fixture.pool.as_ref(), &[1]])).await);
+    let draw =
+        load_draw(&account_data(&mut context, pda(&[b"draw", fixture.pool.as_ref(), &[1]])).await);
     assert_eq!(draw.winner, derived);
     assert_eq!(draw.amount, expected);
     assert!(draw.claimed);
@@ -479,7 +507,12 @@ async fn paid_member_cannot_be_defaulted_and_unpaid_only_after_deadline() {
     join(&mut context, &fixture, &member2).await;
     deposit_stake(&mut context, &fixture, &payer_copy).await;
     deposit_stake(&mut context, &fixture, &member2).await;
-    start_pool(&mut context, &fixture).await;
+    start_pool(
+        &mut context,
+        &fixture,
+        &[payer_copy.pubkey(), member2.pubkey()],
+    )
+    .await;
     // Authority pays. member2 does not.
     pay(&mut context, &fixture, &payer_copy, 1).await;
 
@@ -582,7 +615,8 @@ async fn join_requires_the_hashed_invite_code() {
     );
     let raw = account_data(&mut context, fixture.pool).await;
     assert!(
-        !raw.windows(fixture.invite.len()).any(|w| w == fixture.invite.as_bytes()),
+        !raw.windows(fixture.invite.len())
+            .any(|w| w == fixture.invite.as_bytes()),
         "invite plaintext must not be stored in the pool account"
     );
 
@@ -591,13 +625,24 @@ async fn join_requires_the_hashed_invite_code() {
     wrong_codes.retain(|code| code != &fixture.invite);
     for code in wrong_codes {
         let ix = join_ix(&fixture, member2.pubkey(), &code);
-        assert_logs_contain(&send(&mut context, &[ix], &[&member2]).await, "Invalid invite code");
+        assert_logs_contain(
+            &send(&mut context, &[ix], &[&member2]).await,
+            "Invalid invite code",
+        );
         assert!(
-            context.banks_client.get_account(member_pda).await.unwrap().is_none(),
+            context
+                .banks_client
+                .get_account(member_pda)
+                .await
+                .unwrap()
+                .is_none(),
             "rejected join must not create a member account"
         );
     }
-    assert_eq!(load_pool(&account_data(&mut context, fixture.pool).await).member_count, 0);
+    assert_eq!(
+        load_pool(&account_data(&mut context, fixture.pool).await).member_count,
+        0
+    );
 
     join(&mut context, &fixture, &member2).await;
     let pool = load_pool(&account_data(&mut context, fixture.pool).await);
@@ -631,17 +676,24 @@ async fn program_flow_create_join_stake_start_pay_draw() {
     // Join
     join(&mut context, &fixture, &payer).await;
     join(&mut context, &fixture, &member2).await;
-    assert_eq!(load_pool(&account_data(&mut context, fixture.pool).await).member_count, 2);
+    assert_eq!(
+        load_pool(&account_data(&mut context, fixture.pool).await).member_count,
+        2
+    );
 
     // Deposit stake
     let vault_start = lamports(&mut context, fixture.vault).await;
     deposit_stake(&mut context, &fixture, &payer).await;
     deposit_stake(&mut context, &fixture, &member2).await;
     let vault_staked = lamports(&mut context, fixture.vault).await;
-    assert_eq!(vault_staked - vault_start, CONTRIB * 2, "stake is 1x contribution per member");
+    assert_eq!(
+        vault_staked - vault_start,
+        CONTRIB * 2,
+        "stake is 1x contribution per member"
+    );
 
     // Start
-    start_pool(&mut context, &fixture).await;
+    start_pool(&mut context, &fixture, &[payer.pubkey(), member2.pubkey()]).await;
     let pool = load_pool(&account_data(&mut context, fixture.pool).await);
     assert!(pool.status == PoolStatus::Active);
     assert_eq!(pool.current_round, 1);
@@ -651,7 +703,11 @@ async fn program_flow_create_join_stake_start_pay_draw() {
     pay(&mut context, &fixture, &payer, 1).await;
     pay(&mut context, &fixture, &member2, 1).await;
     let vault_paid = lamports(&mut context, fixture.vault).await;
-    assert_eq!(vault_paid - vault_staked, CONTRIB * 2, "both round-1 payments reach the vault");
+    assert_eq!(
+        vault_paid - vault_staked,
+        CONTRIB * 2,
+        "both round-1 payments reach the vault"
+    );
     for wallet in [payer.pubkey(), member2.pubkey()] {
         let payment = load_payment(
             &account_data(
@@ -663,7 +719,11 @@ async fn program_flow_create_join_stake_start_pay_draw() {
         assert_eq!(payment.round, 1);
         assert_eq!(payment.amount, CONTRIB);
         let member = load_member(
-            &account_data(&mut context, pda(&[b"member", fixture.pool.as_ref(), wallet.as_ref()])).await,
+            &account_data(
+                &mut context,
+                pda(&[b"member", fixture.pool.as_ref(), wallet.as_ref()]),
+            )
+            .await,
         );
         assert_eq!(member.payments_made, 1);
     }
@@ -686,11 +746,19 @@ async fn program_flow_create_join_stake_start_pay_draw() {
 
     let vault_after = lamports(&mut context, fixture.vault).await;
     assert_eq!(vault_paid - vault_after, CONTRIB * 2);
-    assert_eq!(vault_after - vault_start, CONTRIB * 2, "stakes remain escrowed after the draw");
+    assert_eq!(
+        vault_after - vault_start,
+        CONTRIB * 2,
+        "stakes remain escrowed after the draw"
+    );
     if derived != payer.pubkey() {
-        assert_eq!(lamports(&mut context, derived).await - winner_before, CONTRIB * 2);
+        assert_eq!(
+            lamports(&mut context, derived).await - winner_before,
+            CONTRIB * 2
+        );
     }
-    let draw = load_draw(&account_data(&mut context, pda(&[b"draw", fixture.pool.as_ref(), &[1]])).await);
+    let draw =
+        load_draw(&account_data(&mut context, pda(&[b"draw", fixture.pool.as_ref(), &[1]])).await);
     assert_eq!(draw.winner, derived);
     assert_eq!(draw.amount, CONTRIB * 2);
 }
@@ -740,50 +808,10 @@ async fn outsider_cannot_derive_invite_code_from_pool_account() {
     );
 }
 
-/// Pay the round for every wallet, commit randomness, and execute the draw for the
-/// derived winner. Returns the winner.
-async fn play_round(
-    context: &mut ProgramTestContext,
-    fixture: &PoolFixture,
-    players: &[&Keypair],
-    round: u8,
-) -> Pubkey {
-    for player in players {
-        pay(context, fixture, player, round).await;
-    }
-    let clock: Clock = context.banks_client.get_sysvar().await.unwrap();
-    context.warp_to_slot(clock.slot + 5).unwrap();
-    let committed_slot = commit(context, fixture).await;
-    context.warp_to_slot(committed_slot + 3).unwrap();
-
-    let slot_hash_account = account_data(context, slot_hashes::id()).await;
-    let hash = read_slot_hash(&slot_hash_account, committed_slot).unwrap();
-    let mut eligible = Vec::new();
-    for player in players {
-        let member = load_member(
-            &account_data(context, pda(&[b"member", fixture.pool.as_ref(), player.pubkey().as_ref()])).await,
-        );
-        if !member.has_won {
-            eligible.push(player.pubkey());
-        }
-    }
-    let winner = select_winner(&hash, &mut eligible).expect("an eligible member remains");
-    let member_pdas: Vec<Pubkey> = players
-        .iter()
-        .map(|p| pda(&[b"member", fixture.pool.as_ref(), p.pubkey().as_ref()]))
-        .collect();
-    let ix = execute_ix(fixture, context.payer.pubkey(), winner, round, &member_pdas);
-    assert_ok(&send(context, &[ix], &[]).await, "execute_draw");
-    winner
-}
-
-/// P-3 (issue filed): `total_rounds` is fixed to `max_members` at create, and
-/// `start_pool` accepts fewer members. With 2 of 3 seats filled, everyone has won after
-/// round 2, the pool can never reach Completed, and stake refunds (which require
-/// Completed) are locked forever.
+/// CLOCK IN E2E-14 / #13: `total_rounds` is fixed to `max_members`, so a pool
+/// started below capacity can never complete. `start_pool` must refuse until full.
 #[tokio::test]
-#[ignore = "P-3: pool started below capacity never completes; stakes locked (see docs/e2e-proof)"]
-async fn pool_started_below_capacity_completes_when_everyone_has_won() {
+async fn start_pool_refuses_until_the_roster_is_full() {
     let member2 = Keypair::new();
     let mut test = program_test();
     test.add_account(
@@ -798,19 +826,64 @@ async fn pool_started_below_capacity_completes_when_everyone_has_won() {
     join(&mut context, &fixture, &member2).await; // only 2 join
     deposit_stake(&mut context, &fixture, &payer).await;
     deposit_stake(&mut context, &fixture, &member2).await;
-    start_pool(&mut context, &fixture).await;
 
-    let first = play_round(&mut context, &fixture, &[&payer, &member2], 1).await;
-    let second = play_round(&mut context, &fixture, &[&payer, &member2], 2).await;
-    assert_ne!(first, second, "each member wins exactly once");
-
+    let ix = start_ix(
+        context.payer.pubkey(),
+        &fixture,
+        &[payer.pubkey(), member2.pubkey()],
+    );
+    assert_logs_contain(
+        &send(&mut context, &[ix], &[]).await,
+        "Not enough members to start pool",
+    );
     let pool = load_pool(&account_data(&mut context, fixture.pool).await);
+    assert!(pool.status == PoolStatus::Pending);
+    assert_eq!(pool.member_count, 2);
+    assert_eq!(pool.max_members, 3);
+}
+
+/// #8: a stake-enabled pool must not start while any joined member is unstaked.
+#[tokio::test]
+async fn start_pool_refuses_until_every_joined_member_has_stake() {
+    let member2 = Keypair::new();
+    let mut test = program_test();
+    test.add_account(
+        member2.pubkey(),
+        Account::new(2_000_000_000, 0, &system_program::id()),
+    );
+    let mut context = test.start_with_context().await;
+    let payer = context.payer.insecure_clone();
+
+    let fixture = create_pool(&mut context, 2, true).await;
+    join(&mut context, &fixture, &payer).await;
+    join(&mut context, &fixture, &member2).await;
+    deposit_stake(&mut context, &fixture, &payer).await;
+    // member2 has joined but not staked.
+
+    let omitted = start_ix(context.payer.pubkey(), &fixture, &[]);
+    assert_logs_contain(
+        &send(&mut context, &[omitted], &[]).await,
+        "Member set does not match the pool roster",
+    );
+
+    // ProgramTest rejects an identical recent blockhash as AlreadyProcessed; use a
+    // fresh slot for the second negative attempt.
+    let clock: Clock = context.banks_client.get_sysvar().await.unwrap();
+    context.warp_to_slot(clock.slot + 2).unwrap();
+
+    let wallets = [payer.pubkey(), member2.pubkey()];
+    let unstaked = start_ix(context.payer.pubkey(), &fixture, &wallets);
+    assert_logs_contain(
+        &send(&mut context, &[unstaked], &[]).await,
+        "Stake not deposited",
+    );
     assert!(
-        pool.status == PoolStatus::Completed,
-        "both members have won but the pool is still {:?} at round {}/{}; claim_stake_refund requires Completed, so {} lamports of stakes are locked",
-        if pool.status == PoolStatus::Active { "Active" } else { "not Completed" },
-        pool.current_round,
-        pool.total_rounds,
-        CONTRIB * 2
+        load_pool(&account_data(&mut context, fixture.pool).await).status == PoolStatus::Pending
+    );
+
+    deposit_stake(&mut context, &fixture, &member2).await;
+    start_pool(&mut context, &fixture, &wallets).await;
+    assert!(
+        load_pool(&account_data(&mut context, fixture.pool).await).status == PoolStatus::Active
     );
 }
