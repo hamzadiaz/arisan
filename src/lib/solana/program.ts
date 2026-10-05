@@ -5,7 +5,7 @@ import idl from "./idl.json";
 
 // Program ID from the deployed contract
 export const PROGRAM_ID = new PublicKey(
-  "BjxGBSpEULzq9kJfx3bGB1rpVHwta8QuP2jeVKow3wN6"
+  "Aw54KXqUyccCACmmry5MmCmTzqJqKfmnL868aMpJaGbB"
 );
 
 // Account seeds for PDA derivation - must match Rust program exactly

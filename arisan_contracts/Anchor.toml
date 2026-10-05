@@ -5,17 +5,17 @@ resolution = true
 skip-lint = false
 
 [programs.localnet]
-arisan_contracts = "BjxGBSpEULzq9kJfx3bGB1rpVHwta8QuP2jeVKow3wN6"
+arisan_contracts = "Aw54KXqUyccCACmmry5MmCmTzqJqKfmnL868aMpJaGbB"
 
 [programs.devnet]
-arisan_contracts = "BjxGBSpEULzq9kJfx3bGB1rpVHwta8QuP2jeVKow3wN6"
+arisan_contracts = "Aw54KXqUyccCACmmry5MmCmTzqJqKfmnL868aMpJaGbB"
 
 [registry]
 url = "https://api.apr.dev"
 
 [provider]
 cluster = "Devnet"
-wallet = "~/.config/solana/devnet.json"
+wallet = "~/.config/solana/id.json"
 
 [scripts]
 test = "cargo test -p arisan_contracts --offline --lib --test security_p0 -- --test-threads=1"
