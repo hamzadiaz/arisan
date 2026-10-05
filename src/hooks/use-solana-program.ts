@@ -9,6 +9,7 @@ import {
   getProgram,
   getMemberPDA,
   getVaultPDA,
+  getPaymentPDA,
   PROGRAM_ID,
 } from "@/lib/solana/program";
 import {
@@ -436,10 +437,18 @@ export function useSolanaPoolActions() {
       setError(null);
 
       try {
+        const accounts = program.account as any;
+        const poolAccount = await accounts.pool.fetch(params.poolAddress);
+        const roster = (poolAccount.memberWallets as PublicKey[])
+          .slice(0, poolAccount.rosterLen as number)
+          .filter((wallet) => !wallet.equals(PublicKey.default));
+        const memberAccounts = poolAccount.stakeEnabled
+          ? roster.map((wallet) => getMemberPDA(params.poolAddress, wallet)[0])
+          : [];
         const transaction = await buildStartPoolTransaction(
           program,
           walletAddress,
-          params
+          { ...params, memberAccounts }
         );
 
         const result = await sendTransactionHelper(transaction, "start_pool");
@@ -660,6 +669,7 @@ export function useSolanaPoolActions() {
           round: params.round,
           derivedWinner: selectDerivedWinner(hash, eligible),
           memberAccounts,
+          paymentAccounts: roster.map((wallet) => getPaymentPDA(params.poolAddress, wallet, params.round)[0]),
         });
         // Twenty seats can outgrow the default compute budget, and dust in the vault must
         // not leave it between zero and rent-exempt after the payout.

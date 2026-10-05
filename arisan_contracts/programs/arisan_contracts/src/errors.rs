@@ -115,4 +115,7 @@ pub enum ArisanError {
 
     #[msg("Payment account does not match this member and round")]
     InvalidPaymentAccount,
+
+    #[msg("All members must pay the current round")]
+    RoundNotFullyPaid,
 }
