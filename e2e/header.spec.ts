@@ -44,9 +44,13 @@ test.describe("Header on every route (disconnected)", () => {
         await expect(header(page).getByRole("button", { name: "Back" })).toHaveCount(0);
       }
 
-      // Identity: the obvious next action is Connect, and it opens the sheet
-      await expect(connectChip(page)).toBeVisible();
-      await openWalletSheet(page, () => connectChip(page).click());
+      // Identity: the obvious next action is Connect, and it opens the sheet. Signed-out Home
+      // leads with its own Connect wallet button, so its header doesn't repeat it.
+      const home = route.path === "/";
+      const connect = home ? page.locator("main").getByRole("button", { name: "Connect wallet" }) : connectChip(page);
+      if (home) await expect(connectChip(page)).toHaveCount(0);
+      await expect(connect).toBeVisible();
+      await openWalletSheet(page, () => connect.click());
       await walletSheet(page).locator(".wallet-adapter-modal-button-close").click();
       await expect(walletSheet(page)).toBeHidden();
 

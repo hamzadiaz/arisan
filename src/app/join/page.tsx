@@ -61,6 +61,8 @@ export default function JoinPage() {
   const [searching, setSearching] = useState(false);
   const [notFound, setNotFound] = useState(false);
   const [lookupFailed, setLookupFailed] = useState(false);
+  // Find was tapped before all eight characters were in
+  const [incomplete, setIncomplete] = useState(false);
 
   useEffect(() => {
     alive.current = true;
@@ -118,15 +120,24 @@ export default function JoinPage() {
       .finally(() => setSearching(false));
   }, [getPoolByInviteCode]);
 
-  // The eighth character looks the circle up by itself, like any one-time code
+  // A complete code looks the circle up by itself, like any one-time code: the eighth
+  // character, or a whole new code pasted over the last one
   const updateCode = (raw: string) => {
     const next = normalizeCode(raw);
-    const completed = next.length === CODE_LENGTH && code.length !== CODE_LENGTH;
+    const completed = next.length === CODE_LENGTH && next !== code;
     setCode(next);
     setPool(null);
     setNotFound(false);
     setLookupFailed(false);
+    setIncomplete(false);
     if (completed) void lookup(next);
+  };
+
+  const find = () => {
+    if (code.length === CODE_LENGTH) return void lookup(code);
+    // Never a dead button: say what's missing and put the caret back in the boxes
+    setIncomplete(true);
+    document.getElementById("join-code")?.focus();
   };
 
   const paste = async () => {
@@ -188,10 +199,17 @@ export default function JoinPage() {
           state={notFound ? "error" : pool ? "found" : "idle"}
           readOnly={searching || joining}
           describedBy="join-code-help"
+          id="join-code"
         />
         <div className="mt-3 flex items-center justify-between gap-3">
-          <p id="join-code-help" role="status" className={notFound ? "bz-help bz-help-signal m-0" : "bz-help m-0"}>
-            {searching ? "Looking up the circle…" : notFound ? "No circle with that code." : "An invite link fills this in."}
+          <p id="join-code-help" role="status" className={notFound || incomplete ? "bz-help bz-help-signal m-0" : "bz-help m-0"}>
+            {searching
+              ? "Looking up the circle…"
+              : notFound
+                ? "No circle with that code."
+                : incomplete
+                  ? `Enter all ${CODE_LENGTH} letters or numbers.`
+                  : "An invite link fills this in."}
           </p>
           <button
             onClick={paste}
@@ -214,8 +232,7 @@ export default function JoinPage() {
         <Button
           className="mt-5"
           icon={lookupFailed ? "refresh" : undefined}
-          onClick={() => void lookup(code)}
-          disabled={code.length !== CODE_LENGTH}
+          onClick={find}
           busy={searching}
           busyLabel="Looking up…"
         >

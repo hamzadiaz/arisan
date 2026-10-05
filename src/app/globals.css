@@ -512,9 +512,10 @@
     font-weight: 500;
   }
 
+  /* Hints, never mistaken for something already filled in */
   .bz-field input::placeholder {
-    color: var(--muted-foreground);
-    opacity: 0.9;
+    color: var(--quiet);
+    opacity: 1;
     font-weight: 400;
   }
 
@@ -1044,38 +1045,34 @@
     justify-content: flex-end;
   }
 
+  /* The gold coin sits in the dock with the other tabs: nothing hangs over its edge */
   .bz-coin-btn {
-    position: absolute;
-    top: -20px;
-    left: 50%;
     display: grid;
-    width: 54px;
-    height: 54px;
+    width: 36px;
+    height: 36px;
     place-items: center;
     border-radius: 50%;
     color: #3a2905;
     background: radial-gradient(circle at 34% 28%, #fff3cc 0%, #f2d27c 30%, #d4af37 58%, #9b7224 100%);
     box-shadow:
       inset 0 0 0 1.5px rgba(255, 243, 204, 0.6),
-      inset 0 -4px 7px rgba(110, 76, 18, 0.45),
-      0 0 0 4px var(--background),
-      0 12px 20px -8px rgba(0, 0, 0, 0.6);
-    transform: translateX(-50%);
+      inset 0 -3px 6px rgba(110, 76, 18, 0.45),
+      0 6px 14px -6px rgba(0, 0, 0, 0.6);
     transition: transform 0.15s ease, box-shadow 0.2s ease;
   }
 
   .bz-dock-coin:active .bz-coin-btn {
-    transform: translateX(-50%) scale(0.95);
+    transform: scale(0.94);
   }
 
   /* On Create, a lume ring says where you are */
   .bz-dock-coin[data-active="true"] .bz-coin-btn {
     box-shadow:
       inset 0 0 0 1.5px rgba(255, 243, 204, 0.6),
-      inset 0 -4px 7px rgba(110, 76, 18, 0.45),
-      0 0 0 3px var(--background),
-      0 0 0 5px var(--glow),
-      0 12px 20px -8px rgba(0, 0, 0, 0.6);
+      inset 0 -3px 6px rgba(110, 76, 18, 0.45),
+      0 0 0 2px var(--sheet),
+      0 0 0 3.5px var(--glow),
+      0 6px 14px -6px rgba(0, 0, 0, 0.6);
   }
 }
 

@@ -24,10 +24,12 @@ let lastPath: string | null = null;
 interface AppShellProps {
   title?: string;
   back?: boolean;
+  /** The screen already leads with Connect wallet: no second Connect in the header */
+  hideConnect?: boolean;
   children: React.ReactNode;
 }
 
-export function AppShell({ title, back, children }: AppShellProps) {
+export function AppShell({ title, back, hideConnect, children }: AppShellProps) {
   const pathname = usePathname();
   const router = useRouter();
   const introDone = useSyncExternalStore(subscribeIntro, introSeen, () => true);
@@ -81,7 +83,7 @@ export function AppShell({ title, back, children }: AppShellProps) {
             {title ?? "Arisan"}
           </h1>
           <ThemeToggle />
-          <WalletChip />
+          {!hideConnect && <WalletChip />}
         </div>
       </header>
 
@@ -111,7 +113,7 @@ export function AppShell({ title, back, children }: AppShellProps) {
                 >
                   {coin ? (
                     <span aria-hidden="true" className="bz-coin-btn">
-                      <Icon name="plus" className="size-6" strokeWidth={2.2} />
+                      <Icon name="plus" className="size-5" strokeWidth={2.4} />
                     </span>
                   ) : (
                     <Icon name={icon} className="size-6" />

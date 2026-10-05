@@ -14,16 +14,15 @@ import {
 const nav = (page: import("@playwright/test").Page) => page.locator("nav");
 
 test.describe("1. Home welcome", () => {
-  test("shows the heading, Connect wallet and the invite link", async ({ page }) => {
+  test("leads with one Connect wallet; joining with a code is the Join tab", async ({ page }) => {
     await gotoReady(page, "/");
     await expect(page.getByRole("heading", { name: "Savings circles on Solana" })).toBeVisible();
-    await expect(page.getByRole("button", { name: "Connect wallet" })).toBeVisible();
-    const invite = page.getByRole("link", { name: "Join with code" });
-    await expect(invite).toBeVisible();
-    await expect(invite).toHaveAttribute("href", "/join");
+    // One way to connect and one way to join: no second Connect in the header, no Join link
+    await expect(page.getByRole("button", { name: /^Connect/ })).toHaveCount(1);
+    await expect(page.locator("main").getByRole("link", { name: "Join with code" })).toHaveCount(0);
     await proof(page, "01-home-welcome");
 
-    await invite.click();
+    await nav(page).getByRole("link", { name: "Join" }).click();
     await expect(page).toHaveURL(/\/join$/);
   });
 });
@@ -127,11 +126,14 @@ test.describe("5. Join", () => {
     const find = page.getByRole("button", { name: "Find circle" });
 
     await expect(input).toBeVisible();
-    await expect(find).toBeDisabled();
+    // Never a dead button: before the code is complete, Find says what's missing
+    await find.click();
+    await expect(page.getByText("Enter all 8 letters or numbers.")).toBeVisible();
+    await expect(input).toBeFocused();
 
     await input.fill("ab-cd 12");
     await expect(input).toHaveValue("ABCD12");
-    await expect(find).toBeDisabled();
+    await expect(page.getByText("Enter all 8 letters or numbers.")).toHaveCount(0);
 
     // The eighth character looks the circle up by itself. The app's RPC is unreachable
     // here: that must not read as "wrong code" (E2E-5)
@@ -146,6 +148,16 @@ test.describe("5. Join", () => {
     await page.evaluate(() => navigator.clipboard.writeText(" qwer-7890 "));
     await page.getByRole("button", { name: "Paste" }).click();
     await expect(input).toHaveValue("QWER7890");
+  });
+
+  test("a full code pasted over another full code looks the new one up", async ({ page }) => {
+    await mockRpcWithPool(page);
+    await gotoReady(page, "/join");
+    const input = page.getByPlaceholder("ABCD1234");
+    await input.fill("ZZZZ9999");
+    await expect(page.getByText("No circle with that code.")).toBeVisible();
+    await input.fill(MOCK_POOL.inviteCode);
+    await expect(page.getByRole("heading", { name: MOCK_POOL.name })).toBeVisible();
   });
 
   test("a wrong code on a reachable network reports no match", async ({ page }) => {

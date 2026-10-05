@@ -14,6 +14,7 @@ import { useSolanaPoolActions } from "@/hooks/use-solana-program";
 import { useBalance } from "@/hooks/use-balance";
 import { clampUtf8, formatAmount, sanitizeAmountInput } from "@/lib/format";
 import { getExplorerLink } from "@/lib/solana/instructions";
+import { cn } from "@/lib/utils";
 import { poolToasts, txErrorToast, dismissToast } from "@/lib/solana/transaction-toast";
 
 const MIN_MEMBERS = 2;
@@ -119,7 +120,7 @@ function CreateForm({ onCreated }: { onCreated: (c: Created) => void }) {
         <input
           value={name}
           onChange={(e) => setName(clampUtf8(e.target.value, NAME_MAX_BYTES))}
-          placeholder="Family circle"
+          placeholder="e.g. Family circle"
           disabled={isLoading}
         />
       </label>
@@ -130,11 +131,11 @@ function CreateForm({ onCreated }: { onCreated: (c: Created) => void }) {
           inputMode="decimal"
           value={amount}
           onChange={(e) => setAmount(sanitizeAmountInput(e.target.value, SOL_DECIMALS))}
-          placeholder="0.5"
+          placeholder="e.g. 0.5"
           disabled={isLoading}
           className="tabular-nums"
         />
-        <span className="bz-label">SOL</span>
+        <span className={cn("bz-label", !amount && "opacity-50")}>SOL</span>
       </label>
 
       <div className="mb-2 mt-5 flex items-baseline justify-between gap-3 px-1">

@@ -28,19 +28,19 @@ const OPEN_DIAL: DialSpec = { seats: 6, mode: "pending", open: [0, 1, 2, 3, 4, 5
 export default function HomePage() {
   const { connected } = useWallet();
 
-  return <AppShell>{connected ? <MyCircles /> : <Welcome />}</AppShell>;
+  // Signed out, Home leads with Connect wallet: the header doesn't repeat it
+  return <AppShell hideConnect={!connected}>{connected ? <MyCircles /> : <Welcome />}</AppShell>;
 }
 
+// Signed out: the dial and one action, centred in the space above the dock. Joining with a
+// code is the dock's Join tab, right below.
 function Welcome() {
   return (
-    <div className="flex flex-col items-center pt-2 text-center">
-      <Dial spec={WELCOME_DIAL} size={270} label="The Arisan dial: a gold coin in emerald glass" />
-      <h2 className="bz-title mt-3">Savings circles on Solana</h2>
+    <div className="flex min-h-[calc(100dvh-60px-env(safe-area-inset-top)-7.25rem-env(safe-area-inset-bottom))] flex-col items-center justify-center pb-4 text-center">
+      <Dial spec={WELCOME_DIAL} size={300} label="The Arisan dial: a gold coin in emerald glass" />
+      <h2 className="bz-title mt-4">Savings circles on Solana</h2>
       <p className="bz-body mt-1.5">Pay in each round. Take the pot once.</p>
       <ConnectWalletButton className="mt-7" />
-      <Link href="/join" className="bz-link mt-5 h-11">
-        Join with code
-      </Link>
     </div>
   );
 }

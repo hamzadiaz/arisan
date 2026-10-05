@@ -12,11 +12,12 @@ export async function proof(page: Page, name: string) {
   await page.screenshot({ path: path.join(PROOF_DIR, `${name}.png`), fullPage: true });
 }
 
-/** Wait until client providers have mounted (the wallet modal context is client-only). */
+/** Wait until client providers have mounted (the wallet modal context is client-only). The
+ * first-visit intro hides the app's chrome while it's open, so either one means ready. */
 export async function gotoReady(page: Page, url: string) {
   await page.goto(url);
   await page.waitForLoadState("networkidle").catch(() => {});
-  await expect(page.locator("nav")).toBeVisible();
+  await expect(page.locator("nav:visible").or(page.getByTestId("walkthrough"))).toBeVisible();
 }
 
 export const walletSheet = (page: Page) => page.locator(".wallet-adapter-modal");
@@ -466,11 +467,14 @@ export async function installMockWallet(page: Page, options: { sends?: boolean }
   );
 }
 
-/** Connect the mock wallet through the real header chip and wallet sheet. */
+/** Connect the mock wallet through the real header chip and wallet sheet (or, on the signed-out
+ * Home, which leads with it, the Connect wallet button). */
 export async function connectMockWallet(page: Page) {
-  await openWalletSheet(page, () =>
-    page.locator("header").getByRole("button", { name: "Connect", exact: true }).click()
-  );
+  const chip = page.locator("header").getByRole("button", { name: "Connect", exact: true });
+  await openWalletSheet(page, async () => {
+    if (await chip.count()) await chip.click();
+    else await page.locator("main").getByRole("button", { name: "Connect wallet" }).click();
+  });
   await walletSheet(page).getByRole("button", { name: new RegExp(MOCK_WALLET.name) }).click();
   await expect(page.locator("header").getByText(MOCK_WALLET_SHORT)).toBeVisible();
   // Let the sheet finish closing so proofs don't catch it mid-fade

@@ -126,6 +126,7 @@ export function CodeBoxes({
   label = "Invite code",
   placeholder = "ABCD1234",
   describedBy,
+  id,
 }: {
   value: string;
   onChange?: (raw: string) => void;
@@ -137,6 +138,8 @@ export function CodeBoxes({
   label?: string;
   placeholder?: string;
   describedBy?: string;
+  /** The input's id, so a button elsewhere can put the caret in the boxes */
+  id?: string;
 }) {
   const input = useRef<HTMLInputElement>(null);
   const [focused, setFocused] = useState(false);
@@ -169,6 +172,7 @@ export function CodeBoxes({
             el.setSelectionRange(el.value.length, el.value.length);
           }
         }}
+        id={id}
         placeholder={placeholder}
         aria-label={label}
         aria-invalid={state === "error" || undefined}
