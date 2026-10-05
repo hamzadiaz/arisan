@@ -4,7 +4,7 @@ use anchor_lang::solana_program::{program::invoke_signed, system_instruction};
 
 use crate::draw_randomness::{self, MAX_SLOT_HASH_AGE};
 use crate::errors::ArisanError;
-use crate::state::{Draw, Member, Pool, PoolStatus};
+use crate::state::{Draw, Member, Payment, Pool, PoolStatus};
 
 /// Commit the landing slot for this round's draw.
 ///
@@ -25,8 +25,9 @@ pub struct CommitDrawRandomness<'info> {
 /// Execute the committed draw and pay the derived winner.
 ///
 /// `winner_wallet` is checked against the member selected from the slot hash.
-/// Passing any other wallet fails. Remaining accounts must be the full roster
-/// of member PDAs; their order is not an input to selection.
+/// Passing any other wallet fails. Remaining accounts must contain the full
+/// roster of member PDAs followed by the current-round Payment PDAs in the
+/// same order; their order is not an input to selection.
 #[derive(Accounts)]
 pub struct ExecuteDraw<'info> {
     /// Pool authority, or anyone after the draw deadline.
@@ -122,7 +123,19 @@ pub fn handler(ctx: Context<ExecuteDraw>) -> Result<()> {
         drop(slot_hash_data);
 
         let pool_key = pool.key();
-        let mut eligible = load_eligible_wallets(pool, &pool_key, &ctx.remaining_accounts)?;
+        let roster_len = pool.roster_len as usize;
+        require!(
+            ctx.remaining_accounts.len() == roster_len * 2,
+            ArisanError::InvalidMemberSet
+        );
+        let (member_accounts, payment_accounts) = ctx.remaining_accounts.split_at(roster_len);
+        let mut eligible = load_eligible_wallets(pool, &pool_key, member_accounts)?;
+        require_current_round_payments(
+            pool,
+            &pool_key,
+            member_accounts,
+            payment_accounts,
+        )?;
         let winner_key = draw_randomness::select_winner(&vrf_result, &mut eligible)
             .ok_or(ArisanError::NoEligibleMembers)?;
 
@@ -297,6 +310,56 @@ fn load_eligible_wallets(
     );
 
     Ok(eligible)
+}
+
+fn require_current_round_payments(
+    pool: &Pool,
+    pool_key: &Pubkey,
+    member_accounts: &[AccountInfo],
+    payment_accounts: &[AccountInfo],
+) -> Result<()> {
+    for (member_info, payment_info) in member_accounts.iter().zip(payment_accounts) {
+        let member_data = member_info.try_borrow_data()?;
+        let mut member_slice: &[u8] = &member_data;
+        let member = Member::try_deserialize(&mut member_slice)
+            .map_err(|_| error!(ArisanError::InvalidMemberSet))?;
+        drop(member_data);
+
+        if payment_info.owner != &crate::ID {
+            return err!(ArisanError::RoundNotFullyPaid);
+        }
+        let (payment_pda, _) = Pubkey::find_program_address(
+            &[
+                Payment::SEED_PREFIX,
+                pool_key.as_ref(),
+                member.wallet.as_ref(),
+                &[pool.current_round],
+            ],
+            &crate::ID,
+        );
+        require_keys_eq!(
+            payment_info.key(),
+            payment_pda,
+            ArisanError::InvalidPaymentAccount
+        );
+
+        let payment_data = payment_info.try_borrow_data()?;
+        let mut payment_slice: &[u8] = &payment_data;
+        let payment = Payment::try_deserialize(&mut payment_slice)
+            .map_err(|_| error!(ArisanError::InvalidPaymentAccount))?;
+        require_keys_eq!(payment.pool, *pool_key, ArisanError::InvalidPaymentAccount);
+        require_keys_eq!(
+            payment.member,
+            member.wallet,
+            ArisanError::InvalidPaymentAccount
+        );
+        require!(
+            payment.round == pool.current_round
+                && payment.amount == pool.contribution_amount,
+            ArisanError::RoundNotFullyPaid
+        );
+    }
+    Ok(())
 }
 
 fn mark_winner(info: &AccountInfo, round: u8) -> Result<()> {

@@ -301,6 +301,7 @@ fn execute_ix(
     winner_wallet: Pubkey,
     round: u8,
     member_pdas: &[Pubkey],
+    payment_pdas: &[Pubkey],
 ) -> Instruction {
     let draw = pda(&[b"draw", fixture.pool.as_ref(), &[round]]);
     let mut accounts = arisan_contracts::accounts::ExecuteDraw {
@@ -315,6 +316,9 @@ fn execute_ix(
     .to_account_metas(None);
     for member in member_pdas {
         accounts.push(AccountMeta::new(*member, false));
+    }
+    for payment in payment_pdas {
+        accounts.push(AccountMeta::new(*payment, false));
     }
     Instruction {
         program_id: arisan_contracts::ID,
@@ -346,6 +350,20 @@ fn mark_ix(fixture: &PoolFixture, caller: Pubkey, member_wallet: Pubkey, round: 
     }
 }
 
+fn payment_pdas(fixture: &PoolFixture, wallets: &[Pubkey], round: u8) -> Vec<Pubkey> {
+    wallets
+        .iter()
+        .map(|wallet| {
+            pda(&[
+                b"payment",
+                fixture.pool.as_ref(),
+                wallet.as_ref(),
+                &[round],
+            ])
+        })
+        .collect()
+}
+
 async fn commit(context: &mut ProgramTestContext, fixture: &PoolFixture) -> u64 {
     let ix = Instruction {
         program_id: arisan_contracts::ID,
@@ -359,6 +377,115 @@ async fn commit(context: &mut ProgramTestContext, fixture: &PoolFixture) -> u64 
     assert_ok(&send(context, &[ix], &[]).await, "commit_draw_randomness");
     let pool = load_pool(&account_data(context, fixture.pool).await);
     pool.randomness_slot
+}
+
+#[tokio::test]
+async fn execute_draw_rejects_round_with_an_unpaid_member() {
+    let member2 = Keypair::new();
+    let mut test = program_test();
+    test.add_account(
+        member2.pubkey(),
+        Account::new(2_000_000_000, 0, &system_program::id()),
+    );
+    let mut context = test.start_with_context().await;
+
+    let fixture = create_pool(&mut context, 2, false).await;
+    let payer = context.payer.insecure_clone();
+    join(&mut context, &fixture, &payer).await;
+    join(&mut context, &fixture, &member2).await;
+    start_pool(&mut context, &fixture).await;
+    pay(&mut context, &fixture, &payer, 1).await;
+
+    context.warp_to_slot(20).unwrap();
+    let committed_slot = commit(&mut context, &fixture).await;
+    context.warp_to_slot(committed_slot + 3).unwrap();
+    let slot_hash_account = account_data(&mut context, slot_hashes::id()).await;
+    let hash = read_slot_hash(&slot_hash_account, committed_slot).unwrap();
+    let mut eligible = [payer.pubkey(), member2.pubkey()];
+    let winner = select_winner(&hash, &mut eligible).unwrap();
+    let member_pdas = [
+        pda(&[b"member", fixture.pool.as_ref(), payer.pubkey().as_ref()]),
+        pda(&[b"member", fixture.pool.as_ref(), member2.pubkey().as_ref()]),
+    ];
+
+    let vault_before = lamports(&mut context, fixture.vault).await;
+    let result = send(
+        &mut context,
+        &[execute_ix(
+            &fixture,
+            payer.pubkey(),
+            winner,
+            1,
+            &member_pdas,
+            &payment_pdas(&fixture, &[payer.pubkey(), member2.pubkey()], 1),
+        )],
+        &[],
+    )
+    .await;
+    assert_logs_contain(&result, "All members must pay the current round");
+    assert_eq!(lamports(&mut context, fixture.vault).await, vault_before);
+    assert!(
+        context
+            .banks_client
+            .get_account(pda(&[b"draw", fixture.pool.as_ref(), &[1]]))
+            .await
+            .unwrap()
+            .is_none(),
+        "rejected underpaid draw must not create a draw"
+    );
+}
+
+#[tokio::test]
+async fn execute_draw_succeeds_only_after_every_current_round_payment_exists() {
+    let member2 = Keypair::new();
+    let mut test = program_test();
+    test.add_account(
+        member2.pubkey(),
+        Account::new(2_000_000_000, 0, &system_program::id()),
+    );
+    let mut context = test.start_with_context().await;
+
+    let fixture = create_pool(&mut context, 2, false).await;
+    let payer = context.payer.insecure_clone();
+    join(&mut context, &fixture, &payer).await;
+    join(&mut context, &fixture, &member2).await;
+    start_pool(&mut context, &fixture).await;
+    pay(&mut context, &fixture, &payer, 1).await;
+    pay(&mut context, &fixture, &member2, 1).await;
+
+    context.warp_to_slot(20).unwrap();
+    let committed_slot = commit(&mut context, &fixture).await;
+    context.warp_to_slot(committed_slot + 3).unwrap();
+    let slot_hash_account = account_data(&mut context, slot_hashes::id()).await;
+    let hash = read_slot_hash(&slot_hash_account, committed_slot).unwrap();
+    let mut eligible = [payer.pubkey(), member2.pubkey()];
+    let winner = select_winner(&hash, &mut eligible).unwrap();
+    let member_pdas = [
+        pda(&[b"member", fixture.pool.as_ref(), payer.pubkey().as_ref()]),
+        pda(&[b"member", fixture.pool.as_ref(), member2.pubkey().as_ref()]),
+    ];
+
+    assert_ok(
+        &send(
+            &mut context,
+            &[execute_ix(
+                &fixture,
+                payer.pubkey(),
+                winner,
+                1,
+                &member_pdas,
+                &payment_pdas(&fixture, &[payer.pubkey(), member2.pubkey()], 1),
+            )],
+            &[],
+        )
+        .await,
+        "execute_draw with all current-round payments",
+    );
+    assert_eq!(
+        load_draw(&account_data(&mut context, pda(&[b"draw", fixture.pool.as_ref(), &[1]])).await)
+            .amount,
+        CONTRIB * 2
+    );
 }
 
 #[tokio::test]
@@ -408,6 +535,7 @@ async fn malicious_caller_cannot_choose_winner_and_vault_pays_derived_member() {
         attacker_choice,
         1,
         &reversed,
+        &payment_pdas(&fixture, &[member2.pubkey(), context.payer.pubkey()], 1),
     );
     let rejected = send(&mut context, &[wrong], &[]).await;
     assert_logs_contain(
@@ -421,7 +549,14 @@ async fn malicious_caller_cannot_choose_winner_and_vault_pays_derived_member() {
     );
 
     let winner_before = lamports(&mut context, derived).await;
-    let right = execute_ix(&fixture, context.payer.pubkey(), derived, 1, &member_pdas);
+    let right = execute_ix(
+        &fixture,
+        context.payer.pubkey(),
+        derived,
+        1,
+        &member_pdas,
+        &payment_pdas(&fixture, &[context.payer.pubkey(), member2.pubkey()], 1),
+    );
     assert_ok(&send(&mut context, &[right], &[]).await, "execute_draw");
 
     let expected = CONTRIB * 2;
@@ -681,7 +816,14 @@ async fn program_flow_create_join_stake_start_pay_draw() {
         pda(&[b"member", fixture.pool.as_ref(), member2.pubkey().as_ref()]),
     ];
     let winner_before = lamports(&mut context, derived).await;
-    let ix = execute_ix(&fixture, payer.pubkey(), derived, 1, &member_pdas);
+    let ix = execute_ix(
+        &fixture,
+        payer.pubkey(),
+        derived,
+        1,
+        &member_pdas,
+        &payment_pdas(&fixture, &[payer.pubkey(), member2.pubkey()], 1),
+    );
     assert_ok(&send(&mut context, &[ix], &[]).await, "execute_draw");
 
     let vault_after = lamports(&mut context, fixture.vault).await;
@@ -772,7 +914,15 @@ async fn play_round(
         .iter()
         .map(|p| pda(&[b"member", fixture.pool.as_ref(), p.pubkey().as_ref()]))
         .collect();
-    let ix = execute_ix(fixture, context.payer.pubkey(), winner, round, &member_pdas);
+    let wallets: Vec<Pubkey> = players.iter().map(|p| p.pubkey()).collect();
+    let ix = execute_ix(
+        fixture,
+        context.payer.pubkey(),
+        winner,
+        round,
+        &member_pdas,
+        &payment_pdas(fixture, &wallets, round),
+    );
     assert_ok(&send(context, &[ix], &[]).await, "execute_draw");
     winner
 }
