@@ -6,7 +6,7 @@ Checked 2026-10-05 against `https://api.devnet.solana.com`.
 
 - Program `BjxGBSpEULzq9kJfx3bGB1rpVHwta8QuP2jeVKow3wN6` was last deployed **2025-12-12** (slot 427,830,596).
 - Upgrade authority: `CaJpp31WNCQAZPt11BY13Eqyu1vxPnnJYHDyhXmWwud6`.
-- The program fixes from 2026-09-28 were never deployed: `aca7d1f` (bound draw: `commit_draw_randomness` + slot-hash winner), `f77e322` (invite code as return data), `1dcca50` (only start full pools).
+- The program fixes from 2026-09-28 were never deployed: `aca7d1f` (bound draw: `commit_draw_randomness` + slot-hash winner), `f77e322` (invite code as return data), `1dcca50` (only start full pools). Nor were the later ones: PR #23 (the draw needs every seat paid; start needs the full staked roster) and its follow-up in `execute_draw` (removed seats don't hold the draw; a circle completes once no one left can win).
 
 ## What that breaks (live site and `main` alike)
 
@@ -46,19 +46,19 @@ docker run --rm -v "$PWD/arisan_contracts:/src:ro" -v "$PWD/out:/out" backpackap
   cp target/deploy/arisan_contracts.so /out/'
 ```
 
-Result: `arisan_contracts.so`, 462,056 bytes.
+Result: `arisan_contracts.so`, 477,496 bytes (`main` with PR #23 and the follow-up; 462,056 before them). The same image runs the program tests with stable Rust (`rustup toolchain install stable`, then `RUST_LOG=off cargo +stable test -p arisan_contracts --test security_p0 -- --test-threads=1`): 10 passed, 1 ignored (P-2).
 
 ## Deploy (needs the upgrade authority's key)
 
-The new binary is bigger than the program account: the current program data holds 416,448 bytes, the new one needs 462,056. Extend first, then deploy:
+The new binary is bigger than the program account: the current program data holds 416,448 bytes, the new one needs 477,496. Extend first, then deploy:
 
 ```sh
 solana config set -u devnet -k <upgrade-authority keypair>
-solana program extend BjxGBSpEULzq9kJfx3bGB1rpVHwta8QuP2jeVKow3wN6 50000
+solana program extend BjxGBSpEULzq9kJfx3bGB1rpVHwta8QuP2jeVKow3wN6 65000
 solana program deploy --program-id BjxGBSpEULzq9kJfx3bGB1rpVHwta8QuP2jeVKow3wN6 out/arisan_contracts.so
 ```
 
-Budget about 4 devnet SOL in that wallet: the extension's rent (about 0.35 SOL) and a temporary write buffer (about 3.2 SOL, returned when the deploy finishes).
+Budget about 4 devnet SOL in that wallet: the extension's rent (about 0.45 SOL) and a temporary write buffer (about 3.3 SOL, returned when the deploy finishes).
 
 After the upgrade, pools created by the old program (187-byte accounts) can't be used by the new program or the app; the app skips them as old format. They only hold devnet SOL.
 

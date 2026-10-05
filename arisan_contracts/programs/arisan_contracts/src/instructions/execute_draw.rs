@@ -27,7 +27,9 @@ pub struct CommitDrawRandomness<'info> {
 /// `winner_wallet` is checked against the member selected from the slot hash.
 /// Passing any other wallet fails. Remaining accounts must contain the full
 /// roster of member PDAs followed by the current-round Payment PDAs in the
-/// same order; their order is not an input to selection.
+/// same order; their order is not an input to selection. A kicked member's
+/// Payment PDA is still passed but need not exist: kicked members can't pay
+/// and the pot leaves them out.
 #[derive(Accounts)]
 pub struct ExecuteDraw<'info> {
     /// Pool authority, or anyone after the draw deadline.
@@ -96,7 +98,7 @@ pub fn commit_handler(ctx: Context<CommitDrawRandomness>) -> Result<()> {
 pub fn handler(ctx: Context<ExecuteDraw>) -> Result<()> {
     let clock = Clock::get()?;
 
-    let (pool_key, winner_key, vrf_result, winnings, current_round, vault_bump) = {
+    let (pool_key, winner_key, vrf_result, winnings, current_round, vault_bump, left_to_win) = {
         let pool = &ctx.accounts.pool;
 
         let is_authority = pool.authority == ctx.accounts.authority.key();
@@ -138,6 +140,9 @@ pub fn handler(ctx: Context<ExecuteDraw>) -> Result<()> {
         )?;
         let winner_key = draw_randomness::select_winner(&vrf_result, &mut eligible)
             .ok_or(ArisanError::NoEligibleMembers)?;
+        // Everyone still in has paid this round, so no one is out on grace:
+        // `eligible` is everyone who can still win.
+        let left_to_win = eligible.len() - 1;
 
         let winnings = pool
             .contribution_amount
@@ -151,6 +156,7 @@ pub fn handler(ctx: Context<ExecuteDraw>) -> Result<()> {
             winnings,
             pool.current_round,
             pool.vault_bump,
+            left_to_win,
         )
     };
 
@@ -210,7 +216,7 @@ pub fn handler(ctx: Context<ExecuteDraw>) -> Result<()> {
     )?;
 
     let pool = &mut ctx.accounts.pool;
-    let pool_completed = advance_round(pool, clock.unix_timestamp)?;
+    let pool_completed = advance_round(pool, clock.unix_timestamp, left_to_win)?;
 
     emit!(DrawExecutedAndPaid {
         pool: pool_key,
@@ -225,8 +231,10 @@ pub fn handler(ctx: Context<ExecuteDraw>) -> Result<()> {
     Ok(())
 }
 
-fn advance_round(pool: &mut Pool, now: i64) -> Result<bool> {
-    if pool.current_round < pool.total_rounds {
+/// A kicked member who never won leaves a round nobody can take, so the pool
+/// also completes once no one left can win.
+fn advance_round(pool: &mut Pool, now: i64, left_to_win: usize) -> Result<bool> {
+    if pool.current_round < pool.total_rounds && left_to_win > 0 {
         pool.current_round = pool
             .current_round
             .checked_add(1)
@@ -325,9 +333,6 @@ fn require_current_round_payments(
             .map_err(|_| error!(ArisanError::InvalidMemberSet))?;
         drop(member_data);
 
-        if payment_info.owner != &crate::ID {
-            return err!(ArisanError::RoundNotFullyPaid);
-        }
         let (payment_pda, _) = Pubkey::find_program_address(
             &[
                 Payment::SEED_PREFIX,
@@ -342,6 +347,14 @@ fn require_current_round_payments(
             payment_pda,
             ArisanError::InvalidPaymentAccount
         );
+        // Kicked members can't pay, and the pot (contribution * member_count)
+        // leaves them out.
+        if member.is_kicked {
+            continue;
+        }
+        if payment_info.owner != &crate::ID {
+            return err!(ArisanError::RoundNotFullyPaid);
+        }
 
         let payment_data = payment_info.try_borrow_data()?;
         let mut payment_slice: &[u8] = &payment_data;

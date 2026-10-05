@@ -1074,3 +1074,191 @@ async fn start_pool_refuses_until_every_joined_member_has_stake() {
         load_pool(&account_data(&mut context, fixture.pool).await).status == PoolStatus::Active
     );
 }
+
+/// Move the clock to `unix_timestamp`. The fresh slot also gives retried
+/// instructions a new blockhash.
+async fn set_time(context: &mut ProgramTestContext, unix_timestamp: i64) {
+    let clock: Clock = context.banks_client.get_sysvar().await.unwrap();
+    context.warp_to_slot(clock.slot + 2).unwrap();
+    let mut clock: Clock = context.banks_client.get_sysvar().await.unwrap();
+    clock.unix_timestamp = unix_timestamp;
+    context.set_sysvar(&clock);
+}
+
+/// A kicked member can't pay, so they must not hold the draw: the pot is the
+/// members still in. If they never won, the circle ends once no one left can win.
+#[tokio::test]
+async fn kicked_member_holds_neither_the_draw_nor_the_end_of_the_circle() {
+    let member2 = Keypair::new();
+    let member3 = Keypair::new();
+    let mut test = program_test();
+    for member in [&member2, &member3] {
+        test.add_account(
+            member.pubkey(),
+            Account::new(2_000_000_000, 0, &system_program::id()),
+        );
+    }
+    let mut context = test.start_with_context().await;
+    let payer = context.payer.insecure_clone();
+
+    let fixture = create_pool(&mut context, 3, true).await;
+    let roster = [payer.pubkey(), member2.pubkey(), member3.pubkey()];
+    for member in [&payer, &member2, &member3] {
+        join(&mut context, &fixture, member).await;
+        deposit_stake(&mut context, &fixture, member).await;
+    }
+    start_pool(&mut context, &fixture, &roster).await;
+    // member3 never pays.
+    pay(&mut context, &fixture, &payer, 1).await;
+    pay(&mut context, &fixture, &member2, 1).await;
+
+    let member_pdas: Vec<Pubkey> = roster
+        .iter()
+        .map(|wallet| pda(&[b"member", fixture.pool.as_ref(), wallet.as_ref()]))
+        .collect();
+    let payments = payment_pdas(&fixture, &roster, 1);
+
+    // Past the deadline member3 is slashed and gets a grace period.
+    let pool = load_pool(&account_data(&mut context, fixture.pool).await);
+    set_time(&mut context, pool.next_draw_timestamp + 5).await;
+    let mark = mark_ix(&fixture, payer.pubkey(), member3.pubkey(), 1);
+    assert_ok(&send(&mut context, &[mark.clone()], &[]).await, "mark member3");
+
+    // During grace the draw still waits for them.
+    let committed_slot = commit(&mut context, &fixture).await;
+    context.warp_to_slot(committed_slot + 3).unwrap();
+    let slot_hash_account = account_data(&mut context, slot_hashes::id()).await;
+    let hash = read_slot_hash(&slot_hash_account, committed_slot).unwrap();
+    let mut eligible = [payer.pubkey(), member2.pubkey()];
+    let winner = select_winner(&hash, &mut eligible).unwrap();
+    let draw = execute_ix(&fixture, payer.pubkey(), winner, 1, &member_pdas, &payments);
+    assert_logs_contain(
+        &send(&mut context, &[draw.clone()], &[]).await,
+        "All members must pay the current round",
+    );
+
+    // Once grace is over member3 is kicked.
+    let grace_deadline =
+        load_member(&account_data(&mut context, member_pdas[2]).await).grace_deadline;
+    set_time(&mut context, grace_deadline + 5).await;
+    assert_ok(&send(&mut context, &[mark], &[]).await, "kick member3");
+    assert!(load_member(&account_data(&mut context, member_pdas[2]).await).is_kicked);
+    assert_eq!(
+        load_pool(&account_data(&mut context, fixture.pool).await).member_count,
+        2
+    );
+
+    // Their slot must still be the canonical Payment address.
+    let mut wrong = payments.clone();
+    wrong[2] = pda(&[
+        b"payment",
+        fixture.pool.as_ref(),
+        member3.pubkey().as_ref(),
+        &[2],
+    ]);
+    assert_logs_contain(
+        &send(
+            &mut context,
+            &[execute_ix(&fixture, payer.pubkey(), winner, 1, &member_pdas, &wrong)],
+            &[],
+        )
+        .await,
+        "Payment account does not match this member and round",
+    );
+
+    // The draw goes ahead without them; the pot is the two members who paid.
+    let vault_before = lamports(&mut context, fixture.vault).await;
+    assert_ok(
+        &send(&mut context, &[draw], &[]).await,
+        "execute_draw without the kicked member",
+    );
+    assert_eq!(
+        vault_before - lamports(&mut context, fixture.vault).await,
+        CONTRIB * 2
+    );
+    let pool = load_pool(&account_data(&mut context, fixture.pool).await);
+    assert!(pool.status == PoolStatus::Active);
+    assert_eq!(pool.current_round, 2);
+
+    // Round 2: the last member who can win takes it, and the circle ends a round early.
+    pay(&mut context, &fixture, &payer, 2).await;
+    pay(&mut context, &fixture, &member2, 2).await;
+    let clock: Clock = context.banks_client.get_sysvar().await.unwrap();
+    context.warp_to_slot(clock.slot + 5).unwrap();
+    let committed_slot = commit(&mut context, &fixture).await;
+    context.warp_to_slot(committed_slot + 3).unwrap();
+    let last = if winner == payer.pubkey() {
+        member2.pubkey()
+    } else {
+        payer.pubkey()
+    };
+    assert_ok(
+        &send(
+            &mut context,
+            &[execute_ix(
+                &fixture,
+                payer.pubkey(),
+                last,
+                2,
+                &member_pdas,
+                &payment_pdas(&fixture, &roster, 2),
+            )],
+            &[],
+        )
+        .await,
+        "execute_draw for the last member who can win",
+    );
+    let draw =
+        load_draw(&account_data(&mut context, pda(&[b"draw", fixture.pool.as_ref(), &[2]])).await);
+    assert_eq!(draw.winner, last);
+    assert_eq!(draw.amount, CONTRIB * 2);
+    let pool = load_pool(&account_data(&mut context, fixture.pool).await);
+    assert!(
+        pool.status == PoolStatus::Completed,
+        "no one left can win, so the circle ends"
+    );
+    assert_eq!(pool.total_rounds, 3);
+}
+
+/// Without kicks the circle still runs one round per seat before it completes.
+#[tokio::test]
+async fn full_circle_runs_every_round_then_completes() {
+    let member2 = Keypair::new();
+    let member3 = Keypair::new();
+    let mut test = program_test();
+    for member in [&member2, &member3] {
+        test.add_account(
+            member.pubkey(),
+            Account::new(2_000_000_000, 0, &system_program::id()),
+        );
+    }
+    let mut context = test.start_with_context().await;
+    let payer = context.payer.insecure_clone();
+
+    let fixture = create_pool(&mut context, 3, false).await;
+    let players = [&payer, &member2, &member3];
+    for member in players {
+        join(&mut context, &fixture, member).await;
+    }
+    start_pool(
+        &mut context,
+        &fixture,
+        &[payer.pubkey(), member2.pubkey(), member3.pubkey()],
+    )
+    .await;
+
+    let mut winners = Vec::new();
+    for round in 1..=3u8 {
+        winners.push(play_round(&mut context, &fixture, &players, round).await);
+        let pool = load_pool(&account_data(&mut context, fixture.pool).await);
+        if round < 3 {
+            assert!(pool.status == PoolStatus::Active);
+            assert_eq!(pool.current_round, round + 1);
+        } else {
+            assert!(pool.status == PoolStatus::Completed);
+        }
+    }
+    winners.sort();
+    winners.dedup();
+    assert_eq!(winners.len(), 3, "every member wins once");
+}

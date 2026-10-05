@@ -1,0 +1,23 @@
+# Anchor security_p0, run 2026-10-05 in backpackapp/build:v0.30.1 with stable Rust:
+#   RUST_LOG=off cargo +stable test -p arisan_contracts --test security_p0 -- --test-threads=1
+
+running 11 tests
+test execute_draw_rejects_round_with_an_unpaid_member ... ok
+test execute_draw_succeeds_only_after_every_current_round_payment_exists ... ok
+test full_circle_runs_every_round_then_completes ... ok
+test join_requires_the_hashed_invite_code ... ok
+test kicked_member_holds_neither_the_draw_nor_the_end_of_the_circle ... ok
+test malicious_caller_cannot_choose_winner_and_vault_pays_derived_member ... ok
+test outsider_cannot_derive_invite_code_from_pool_account ... ignored, P-2: invite code is derivable from public pool state (see docs/e2e-proof)
+test paid_member_cannot_be_defaulted_and_unpaid_only_after_deadline ... ok
+test program_flow_create_join_stake_start_pay_draw ... ok
+test start_pool_refuses_until_every_joined_member_has_stake ... ok
+test start_pool_refuses_until_the_roster_is_full ... ok
+
+test result: ok. 10 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 14.24s
+
+# The new removed-seat test against the previous execute_draw.rs (HEAD before this change):
+test kicked_member_holds_neither_the_draw_nor_the_end_of_the_circle ... FAILED
+thread 'kicked_member_holds_neither_the_draw_nor_the_end_of_the_circle' (379) panicked at programs/arisan_contracts/tests/security_p0.rs:94:5:
+Program log: AnchorError thrown in programs/arisan_contracts/src/instructions/execute_draw.rs:329. Error Code: RoundNotFullyPaid. Error Number: 6037. Error Message: All members must pay the current round.
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 10 filtered out; finished in 1.72s
