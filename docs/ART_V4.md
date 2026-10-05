@@ -1,4 +1,4 @@
-> Superseded on `main` by the full-screen canvas walkthrough (`jackpot-scene.tsx`, PR #22). Unique-frame hashes and FrameCycle are not used at runtime.
+> Superseded on `main` by the Bezel intro (`intro-stage.tsx` / walkthrough). Unique-frame hashes and FrameCycle are not used at runtime.
 
 # Art v4 — real walkthrough animation (consecrated gold)
 

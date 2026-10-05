@@ -54,6 +54,7 @@ export default function JoinPage() {
   const card = useRef<HTMLDivElement>(null);
   const alive = useRef(true);
   const linkedOnce = useRef(false);
+  const lookupSeq = useRef(0);
 
   const [code, setCode] = useState("");
   const [pool, setPool] = useState<FetchedPool | null>(null);
@@ -75,21 +76,23 @@ export default function JoinPage() {
 
   const lookup = async (value: string) => {
     if (value.length !== CODE_LENGTH) return;
+    const seq = ++lookupSeq.current;
     setSearching(true);
     setNotFound(false);
     setLookupFailed(false);
-    await getPoolByInviteCode(value).then(
-      (found) => {
-        setPool(found);
-        setNotFound(!found);
-      },
-      (error) => {
-        // An unreachable network is not the same as a wrong code
-        console.error("Invite lookup failed:", error);
-        setLookupFailed(true);
-      }
-    );
-    setSearching(false);
+    try {
+      const found = await getPoolByInviteCode(value);
+      if (seq !== lookupSeq.current) return;
+      setPool(found);
+      setNotFound(!found);
+    } catch (error) {
+      // An unreachable network is not the same as a wrong code
+      if (seq !== lookupSeq.current) return;
+      console.error("Invite lookup failed:", error);
+      setLookupFailed(true);
+    } finally {
+      if (seq === lookupSeq.current) setSearching(false);
+    }
   };
 
   // A shared invite link (/join?code=…) fills the boxes and looks the circle up, once.
@@ -123,7 +126,7 @@ export default function JoinPage() {
     setPool(null);
     setNotFound(false);
     setLookupFailed(false);
-    if (completed && !searching) void lookup(next);
+    if (completed) void lookup(next);
   };
 
   const paste = async () => {
