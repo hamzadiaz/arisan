@@ -1446,3 +1446,78 @@ async fn pending_member_can_leave_and_reclaim_stake() {
     assert!(lamports(&mut context, member2.pubkey()).await > before);
 }
 
+#[tokio::test]
+async fn cannot_leave_or_refund_stake_after_the_circle_starts() {
+    let member2 = Keypair::new();
+    let mut test = program_test();
+    test.add_account(
+        member2.pubkey(),
+        Account::new(2_000_000_000, 0, &system_program::id()),
+    );
+    let mut context = test.start_with_context().await;
+    let payer = context.payer.insecure_clone();
+    let fixture = create_pool(&mut context, 2, true).await;
+    join(&mut context, &fixture, &payer).await;
+    join(&mut context, &fixture, &member2).await;
+    deposit_stake(&mut context, &fixture, &payer).await;
+    deposit_stake(&mut context, &fixture, &member2).await;
+    start_pool(
+        &mut context,
+        &fixture,
+        &[payer.pubkey(), member2.pubkey()],
+    )
+    .await;
+
+    let leave_ix = Instruction {
+        program_id: arisan_contracts::ID,
+        accounts: arisan_contracts::accounts::LeavePool {
+            user: member2.pubkey(),
+            pool: fixture.pool,
+            member: pda(&[b"member", fixture.pool.as_ref(), member2.pubkey().as_ref()]),
+            vault: fixture.vault,
+            system_program: system_program::id(),
+        }
+        .to_account_metas(None),
+        data: arisan_contracts::instruction::LeavePool {}.data(),
+    };
+    assert_logs_contain(
+        &send(&mut context, &[leave_ix], &[&member2]).await,
+        "Cannot leave active pool",
+    );
+
+    play_round(&mut context, &fixture, &[&payer, &member2], 1).await;
+    assert!(
+        load_pool(&account_data(&mut context, fixture.pool).await).status == PoolStatus::Active,
+        "one jackpot does not complete a 2-seat circle"
+    );
+
+    let refund_ix = Instruction {
+        program_id: arisan_contracts::ID,
+        accounts: arisan_contracts::accounts::ClaimStakeRefund {
+            user: member2.pubkey(),
+            pool: fixture.pool,
+            member: pda(&[b"member", fixture.pool.as_ref(), member2.pubkey().as_ref()]),
+            vault: fixture.vault,
+            system_program: system_program::id(),
+        }
+        .to_account_metas(None),
+        data: arisan_contracts::instruction::ClaimStakeRefund {}.data(),
+    };
+    let clock: Clock = context.banks_client.get_sysvar().await.unwrap();
+    context.warp_to_slot(clock.slot + 2).unwrap();
+    assert_logs_contain(
+        &send(&mut context, &[refund_ix], &[&member2]).await,
+        "Pool is not active",
+    );
+    assert!(
+        load_member(
+            &account_data(
+                &mut context,
+                pda(&[b"member", fixture.pool.as_ref(), member2.pubkey().as_ref()]),
+            )
+            .await,
+        )
+        .stake_deposited
+    );
+}
+
