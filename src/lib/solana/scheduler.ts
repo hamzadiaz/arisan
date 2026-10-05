@@ -486,13 +486,18 @@ export async function executeDraw(
         systemProgram: SystemProgram.programId,
         slotHashes: SLOT_HASHES_SYSVAR,
       })
-      .remainingAccounts(
-        memberAccounts.map((pubkey) => ({
+      .remainingAccounts([
+        ...memberAccounts.map((pubkey) => ({
           pubkey,
           isWritable: true,
           isSigner: false,
-        }))
-      )
+        })),
+        ...roster.map((wallet) => ({
+          pubkey: getPaymentPDA(poolAddress, wallet, round)[0],
+          isWritable: false,
+          isSigner: false,
+        })),
+      ])
       .transaction();
     const before = [ComputeBudgetProgram.setComputeUnitLimit({ units: DRAW_COMPUTE_UNITS })];
     const left = vault.balance - vault.pot;
