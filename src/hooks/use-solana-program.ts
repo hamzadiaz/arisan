@@ -68,6 +68,7 @@ export const DRAW_ERROR = {
   vaultShort: "draw:vault-short",
   expired: "draw:expired",
   notReady: "draw:not-ready",
+  unpaid: "draw:unpaid",
 } as const;
 
 /** SlotHashes keeps the last 512 slots; a commit older than that can't be drawn. */
@@ -585,6 +586,14 @@ export function useSolanaPoolActions() {
               })
             );
           });
+        // The program draws only once every seat on the roster has paid this round
+        const everyonePaid = async () => {
+          const infos = await connection.getMultipleAccountsInfo(
+            roster.map((wallet) => getPaymentPDA(params.poolAddress, wallet, params.round)[0]),
+            "confirmed"
+          );
+          return infos.every((info) => !!info && info.owner.equals(program.programId) && info.data.length > 0);
+        };
         // The vault pays contribution × member_count and must still hold every stake owed back.
         const vaultFor = async (members: any[]) => {
           const balance = BigInt(await connection.getBalance(vaultPDA, "confirmed"));
@@ -599,6 +608,9 @@ export function useSolanaPoolActions() {
 
         if (poolAccount.randomnessRound !== params.round) {
           // Step one: commit. Nothing here can be undone, so check everything first.
+          if (!(await everyonePaid())) {
+            return { success: false, error: DRAW_ERROR.unpaid };
+          }
           const members = await readMembers();
           if (eligibleOf(members).length === 0) {
             return { success: false, error: DRAW_ERROR.noWinner };
@@ -650,6 +662,10 @@ export function useSolanaPoolActions() {
         }
         if (!hash) {
           return { success: false, error: DRAW_ERROR.notReady, committed };
+        }
+        // The program refuses to finish while any seat owes this round: don't send a sure failure
+        if (!(await everyonePaid())) {
+          return { success: false, error: DRAW_ERROR.unpaid, committed };
         }
 
         const members = await readMembers();

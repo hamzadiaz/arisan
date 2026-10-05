@@ -349,12 +349,7 @@ export async function executeDraw(
       const nowSec = (await connection.getBlockTime(await connection.getSlot("confirmed"))) ?? Math.floor(Date.now() / 1000);
       const deadlineSec = poolAccount.nextDrawTimestamp.toNumber();
       if (nowSec <= deadlineSec) return skip("Round not due on-chain yet");
-      const rules = {
-        nowSec,
-        deadlineSec,
-        gracePeriodSeconds: poolAccount.gracePeriodSeconds.toNumber(),
-        stakeEnabled: poolAccount.stakeEnabled as boolean,
-      };
+      const rules = { nowSec };
       const seatsOf = async () => {
         const [members, payments] = await Promise.all([
           readMembers(),
@@ -397,7 +392,8 @@ export async function executeDraw(
       }
 
       const { waiting } = settleRound(await seatsOf(), rules);
-      if (waiting.length > 0) return skip(`Waiting for ${waiting.length} seat(s) in grace to pay`);
+      // The program draws only once every seat on the roster has paid this round
+      if (waiting.length > 0) return skip(`Waiting for ${waiting.length} seat(s) to pay`);
     }
 
     const eligibleNow = async () => {

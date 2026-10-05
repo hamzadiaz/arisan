@@ -42,6 +42,10 @@ function drawError(message?: string, committed?: boolean) {
   if (message === DRAW_ERROR.noWinner) return "No seat can win this round.";
   if (message === DRAW_ERROR.vaultShort) return "The vault can’t cover this pot without spending stakes.";
   if (message === DRAW_ERROR.expired) return "The draw wasn’t finished within 3 minutes. This circle is locked until the program is fixed.";
+  if (message === DRAW_ERROR.unpaid)
+    return committed
+      ? "Not every seat has paid. The draw finishes once they do, within 3 minutes."
+      : "Every seat pays this round before the draw.";
   if (committed) return "The draw is started. Tap Finish the draw within 3 minutes.";
   if (message === DRAW_ERROR.notReady) return "The chain hasn’t caught up yet. Try again.";
   return plainError(message);
@@ -421,7 +425,7 @@ export default function PoolPage({ params }: { params: Promise<{ id: string }> }
         hint =
           lowFunds(0) ??
           (f.uncovered > 0
-            ? "Not every seat has paid, so the pot uses stakes. Finish within 3 minutes or the circle locks."
+            ? `${plural(f.uncovered, "seat hasn’t", "seats haven’t")} paid: the draw finishes only once every seat pays. Within 3 minutes, or the circle locks.`
             : "Last step. Finish within 3 minutes or the circle locks.");
       }
       break;
@@ -509,11 +513,11 @@ export default function PoolPage({ params }: { params: Promise<{ id: string }> }
       hint =
         kicks > 0
           ? owedTurn
-            ? "Their 48-hour grace is over. Removed seats that haven’t won keep the circle from finishing until they rejoin."
-            : "Their 48-hour grace is over: this removes them."
+            ? "Their 48-hour grace is over: this removes them. The draw still waits for them to rejoin and pay."
+            : "Their 48-hour grace is over: this removes them. The draw waits for them to rejoin and pay."
           : f.stakePool
-            ? "Their stake covers the pot. Then the draw opens."
-            : "Starts their 48-hour grace.";
+            ? "Slashes their stake and starts a 48-hour grace. The draw waits until they pay."
+            : "Starts their 48-hour grace. The draw waits until they pay.";
       break;
     }
     case "draw":
@@ -532,14 +536,13 @@ export default function PoolPage({ params }: { params: Promise<{ id: string }> }
         </button>
       );
       if (f.drawDue && drawnRound !== pool.currentRound) {
-        hint =
-          f.waitingOn.length > 0
-            ? `Waiting for ${plural(f.waitingOn.length, "seat", "seats")} in grace to pay.`
-            : f.markLeavesNoWinner
-              ? `Waiting for ${plural(f.toMark.length, "seat", "seats")} to pay: ${f.toMark.length === 1 ? "it’s the only one" : "they’re the only ones"} left that can win.`
-              : f.eligible === 0
-                ? "No seat can win this round."
-                : null;
+        hint = f.markLeavesNoWinner
+          ? `Waiting for ${plural(f.toMark.length, "seat", "seats")} to pay: ${f.toMark.length === 1 ? "it’s the only one" : "they’re the only ones"} left that can win.`
+          : f.waitingOn.length > 0
+            ? `Waiting for ${plural(f.waitingOn.length, "seat", "seats")} to ${f.waitingOn.some((w) => w.isKicked) ? "pay or rejoin" : "pay"}.`
+            : f.eligible === 0
+              ? "No seat can win this round."
+              : null;
       }
       break;
     case "closed":

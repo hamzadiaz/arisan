@@ -177,7 +177,7 @@ test.describe("Draw, missed payments and refunds", () => {
   test("an unpaid seat past the deadline is marked before any draw", async ({ page }) => {
     await openPool(page, due([staked(me), staked(other)], [me]));
     await expect(main(page).getByRole("button", { name: "Draw now" })).toHaveCount(0);
-    await expect(main(page).getByText("Their stake covers the pot.", { exact: false })).toBeVisible();
+    await expect(main(page).getByText("Slashes their stake and starts a 48-hour grace.", { exact: false })).toBeVisible();
     await expectSigned(page, "Mark missed payment", /^mark_?[dD]efaulter$/);
   });
 
@@ -192,17 +192,20 @@ test.describe("Draw, missed payments and refunds", () => {
     ]);
   });
 
-  test("a seat marked this round is covered by its slashed stake, so the draw opens", async ({ page }) => {
+  // The program draws only once every seat on the roster has paid: a slashed stake no longer
+  // stands in for a payment.
+  test("a seat marked this round still holds the draw until it pays", async ({ page }) => {
     // Marked a minute ago: its grace started after this round's deadline
     await openPool(page, due([staked(me), { wallet: other, inGracePeriod: true, graceEndsIn: 172_740 }], [me]));
-    await expect(main(page).getByRole("button", { name: "Draw now" })).toBeEnabled();
+    await expect(main(page).getByRole("button", { name: "Draw now" })).toHaveCount(0);
+    await expect(main(page).getByText("Waiting for 1 seat to pay.")).toBeVisible();
   });
 
   test("a seat still in grace from an earlier round holds the draw", async ({ page }) => {
     await openPool(page, due([staked(me), { wallet: other, inGracePeriod: true }], [me]));
     await expect(main(page).getByRole("button", { name: "Draw now" })).toHaveCount(0);
     await expect(main(page).getByRole("button", { name: /^Mark/ })).toHaveCount(0);
-    await expect(main(page).getByText("Waiting for 1 seat in grace to pay.")).toBeVisible();
+    await expect(main(page).getByText("Waiting for 1 seat to pay.")).toBeVisible();
   });
 
   test("the draw waits for the deadline even when everyone has paid", async ({ page }) => {
@@ -236,7 +239,7 @@ test.describe("Draw, missed payments and refunds", () => {
   test("a seat marked without a stake to slash holds the draw", async ({ page }) => {
     await openPool(page, due([staked(me), { wallet: other, inGracePeriod: true, inDefault: false, graceEndsIn: 172_740 }], [me]));
     await expect(main(page).getByRole("button", { name: "Draw now" })).toHaveCount(0);
-    await expect(main(page).getByText("Waiting for 1 seat in grace to pay.")).toBeVisible();
+    await expect(main(page).getByText("Waiting for 1 seat to pay.")).toBeVisible();
   });
 
   test("in a stake-free circle a marked seat holds the draw: nothing covers its share", async ({ page }) => {
@@ -245,7 +248,7 @@ test.describe("Draw, missed payments and refunds", () => {
       due([{ wallet: me }, { wallet: other, inGracePeriod: true, inDefault: false, graceEndsIn: 172_740 }], [me], { stakeEnabled: false })
     );
     await expect(main(page).getByRole("button", { name: "Draw now" })).toHaveCount(0);
-    await expect(main(page).getByText("Waiting for 1 seat in grace to pay.")).toBeVisible();
+    await expect(main(page).getByText("Waiting for 1 seat to pay.")).toBeVisible();
   });
 
   test("automatic circles leave the first two minutes after the deadline to the server", async ({ page }) => {
@@ -256,7 +259,7 @@ test.describe("Draw, missed payments and refunds", () => {
 
   test("a seat whose grace is over is removed, and the button says so", async ({ page }) => {
     await openPool(page, due([staked(me), { wallet: other, inGracePeriod: true, graceEndsIn: -3_600 }], [me]));
-    await expect(main(page).getByText("keep the circle from finishing", { exact: false })).toBeVisible();
+    await expect(main(page).getByText("The draw still waits for them to rejoin and pay.", { exact: false })).toBeVisible();
     await expectSigned(page, "Remove 1 seat", /^mark_?[dD]efaulter$/);
   });
 
@@ -282,13 +285,21 @@ test.describe("Draw, missed payments and refunds", () => {
     await expect(main(page).getByText("Waiting for 1 seat to pay: it’s the only one left that can win.")).toBeVisible();
   });
 
-  test("the host finishes a draw started early before anything else", async ({ page }) => {
+  test("the host pays before finishing a draw started early: the program needs every seat paid", async ({ page }) => {
     await openPool(page, {
       ...due([staked(me), staked(other)], [other], { committedSlot: 900, slot: 1000, nextDrawIn: 600 }),
       authority: me,
     });
-    await expect(main(page).getByRole("button", { name: /^Pay / })).toHaveCount(0);
-    await expectSigned(page, "Finish the draw", /^execute_?[dD]raw$/);
+    await expect(main(page).getByRole("button", { name: "Finish the draw" })).toHaveCount(0);
+    await expectSigned(page, "Pay 0.5 SOL", /^make_?[pP]ayment$/);
+  });
+
+  test("a started draw isn't finished while a seat still owes the round", async ({ page }) => {
+    await openPool(page, due([staked(me), staked(other)], [me], { committedSlot: 900, slot: 1000 }));
+    await expect(main(page).getByText("1 seat hasn’t paid: the draw finishes only once every seat pays.", { exact: false })).toBeVisible();
+    await main(page).getByRole("button", { name: "Finish the draw" }).click();
+    await expect(page.getByText("Not every seat has paid. The draw finishes once they do, within 3 minutes.")).toBeVisible();
+    expect(await signRequests(page)).toHaveLength(0);
   });
 
   test("a finished circle gives the stake back", async ({ page }) => {

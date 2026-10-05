@@ -5,7 +5,6 @@ import { settleRound } from "@/lib/solana/round-settlement";
 export const DRAW_GRACE_MS = 60_000;
 /** SlotHashes keeps 512 slots (about 3.4 minutes): a committed draw must finish inside it. */
 export const SLOT_HASH_WINDOW = 512;
-const DEFAULT_GRACE_SECONDS = 172_800;
 
 /** Everything the circle screen decides from one read of the chain. */
 export interface CircleFacts {
@@ -33,11 +32,11 @@ export interface CircleFacts {
   toKick: FetchedMember[];
   /** The round's deadline has passed (anyone may finish a started draw) */
   pastDeadline: boolean;
-  /** Seats neither paid nor covered by a stake slashed this round */
+  /** Seats that haven't paid this round, removed ones included: the draw needs every one */
   uncovered: number;
   /** Marking every unpaid seat would leave nobody able to win: wait for them to pay instead */
   markLeavesNoWinner: boolean;
-  /** Unpaid seats already in grace that nothing covers this round: the draw waits for them. */
+  /** Seats that haven't paid this round: the program draws only once every one has */
   waitingOn: FetchedMember[];
   /** Seats that can still win this round */
   eligible: number;
@@ -69,23 +68,17 @@ export function circleFacts(
   const isPaid = (m: FetchedMember) => paid.has(m.walletAddress);
   const active = pool.status === "active";
 
-  // The same rule the auto-draw scheduler follows (round-settlement.ts)
+  // The same rule the auto-draw scheduler follows (round-settlement.ts), over the whole roster
   const settled = settleRound(
-    seated.map((m) => ({
+    members.map((m) => ({
       wallet: m.walletAddress,
       paid: isPaid(m),
-      isKicked: false,
+      isKicked: m.isKicked,
       inGracePeriod: m.inGracePeriod,
       inDefault: m.inDefault,
       graceDeadline: m.graceDeadline ? seconds(m.graceDeadline) : 0,
     })),
-    {
-      nowSec: now / 1000,
-      deadlineSec: seconds(pool.nextDrawDate),
-      gracePeriodSeconds: pool.gracePeriodSeconds || DEFAULT_GRACE_SECONDS,
-      stakeEnabled: stakePool,
-      marginSec: 60,
-    }
+    { nowSec: now / 1000, marginSec: 60 }
   );
 
   // Auto circles give the server's per-minute cron the first go at the draw
@@ -97,9 +90,9 @@ export function circleFacts(
   // A marked seat can't win; if the unpaid seats are the only ones left to win, marking them
   // stalls the round (and removing them later locks the circle). Wait for them to pay.
   const markLeavesNoWinner = toMark.length > 0 && seated.filter((m) => canWin(m) && !toMark.includes(m)).length === 0;
-  const waitingOn = seated.filter((m) => settled.waiting.includes(m.walletAddress));
+  const waitingOn = members.filter((m) => settled.waiting.includes(m.walletAddress));
   const eligible = seated.filter((m) => !m.hasWon && !m.inDefault && !m.inGracePeriod).length;
-  const canDraw = drawDue && !committed && toMark.length === 0 && waitingOn.length === 0 && eligible > 0;
+  const canDraw = drawDue && !committed && waitingOn.length === 0 && eligible > 0;
 
   const staked = stakePool ? members.filter((m) => m.stakeDeposited).length : members.length;
   const memberCount = pool.memberCount ?? seated.length;
@@ -122,7 +115,7 @@ export function circleFacts(
     toMark,
     toKick,
     pastDeadline: active && now > pool.nextDrawDate.getTime(),
-    uncovered: active ? settled.toMark.length + settled.waiting.length : 0,
+    uncovered: active ? settled.waiting.length : 0,
     markLeavesNoWinner,
     waitingOn,
     eligible,
@@ -175,9 +168,7 @@ export function circleAction(pool: FetchedPool, f: CircleFacts, connected: boole
   if (pool.status === "active") {
     if (m?.isKicked) return { kind: "rejoin" };
     if (m && f.stakePool && !m.stakeDeposited) return { kind: m.inGracePeriod ? "restake" : "blocked" };
-    // Before the deadline only the host can finish a started draw, and it locks in ~3 minutes
-    if (f.committed && f.isAuthority && !f.pastDeadline) return { kind: "finish" };
-    // Paying first puts your share in the pot before a started draw pays it out
+    // The program finishes a draw only once every seat has paid, yours included: pay first
     if (m && !f.paid.has(m.walletAddress)) return { kind: "pay" };
     // A started draw locks the circle if nobody finishes it within 512 slots. The program
     // lets the host finish at any time and everyone else once the deadline has passed.

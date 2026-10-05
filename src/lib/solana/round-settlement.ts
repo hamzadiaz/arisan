@@ -1,15 +1,11 @@
 /**
- * Who must be marked before a round can be drawn, and who still holds the draw.
+ * Who can be marked after a round's deadline, and who still holds the draw.
  * Shared by the circle screen and the auto-draw scheduler so both follow one rule.
  *
- * The program pays contribution × member_count whether or not everyone paid. A seat that
- * missed the round is covered only by its own slashed stake, and only for the round it was
- * marked in. So once the deadline has passed:
- * - unpaid, and not in grace (or its grace has expired): mark it. mark_defaulter slashes the
- *   stake and starts grace, or kicks the seat (member_count - 1) when grace is over.
- * - unpaid, in a grace that started after this round's deadline, stake slashed: covered.
- * - unpaid, in grace from an earlier round: nothing covers its share, so the draw waits until
- *   it pays or its grace expires.
+ * The program draws only when every seat on the roster has paid this round: execute_draw
+ * checks each seat's Payment account, removed seats included, and a removed seat can only
+ * pay by rejoining. Marking after the deadline is a penalty, not a way round it: it slashes
+ * the stake and starts a 48-hour grace, or removes the seat once that grace is over.
  */
 export interface SeatState {
   wallet: string;
@@ -24,10 +20,6 @@ export interface SeatState {
 
 export interface RoundRules {
   nowSec: number;
-  /** The round's next_draw_timestamp */
-  deadlineSec: number;
-  gracePeriodSeconds: number;
-  stakeEnabled: boolean;
   /** Seconds a grace must be past its deadline before it counts as over (device clocks drift). */
   marginSec?: number;
 }
@@ -35,17 +27,13 @@ export interface RoundRules {
 export function settleRound(seats: SeatState[], rules: RoundRules) {
   const seated = seats.filter((s) => !s.isKicked);
   const graceOver = (s: SeatState) => s.graceDeadline > 0 && rules.nowSec > s.graceDeadline + (rules.marginSec ?? 0);
-  // mark_defaulter only runs after the deadline, so a grace that began after this round's
-  // deadline was begun for this round.
-  const markedThisRound = (s: SeatState) => s.inGracePeriod && s.graceDeadline - rules.gracePeriodSeconds > rules.deadlineSec;
   const markable = (s: SeatState) => !s.paid && (!s.inGracePeriod || graceOver(s));
-  const covered = (s: SeatState) => s.paid || (rules.stakeEnabled && s.inDefault && markedThisRound(s));
   return {
     /** Seats to mark now (only meaningful once the deadline has passed) */
     toMark: seated.filter(markable).map((s) => s.wallet),
     /** The part of toMark whose grace is over: marking removes these seats */
     toKick: seated.filter((s) => markable(s) && s.inGracePeriod).map((s) => s.wallet),
-    /** Unpaid seats nothing covers: the draw waits for them */
-    waiting: seated.filter((s) => !covered(s) && !markable(s)).map((s) => s.wallet),
+    /** Every unpaid seat, removed ones included: the draw waits for all of them */
+    waiting: seats.filter((s) => !s.paid).map((s) => s.wallet),
   };
 }
