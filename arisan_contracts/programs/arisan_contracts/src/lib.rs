@@ -7,7 +7,7 @@ pub mod state;
 
 use instructions::*;
 
-declare_id!("BjxGBSpEULzq9kJfx3bGB1rpVHwta8QuP2jeVKow3wN6");
+declare_id!("Aw54KXqUyccCACmmry5MmCmTzqJqKfmnL868aMpJaGbB");
 
 /// Arisan - Trustless Rotating Savings Pool on Solana
 ///
