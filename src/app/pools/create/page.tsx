@@ -182,7 +182,7 @@ function CreateForm({ onCreated }: { onCreated: (c: Created) => void }) {
       </p>
 
       {/* The main button stays above the tab bar on short screens */}
-      <div className="bz-sticky-cta sticky bottom-[calc(62px+env(safe-area-inset-bottom))] z-10 -mx-4 mt-3 bg-background px-4 pb-3 pt-2 shadow-[0_-10px_12px_-8px_var(--background)]">
+      <div className="bz-sticky-cta sticky bottom-[calc(98px+env(safe-area-inset-bottom))] z-10 -mx-4 mt-3 bg-background px-4 pb-3 pt-2 shadow-[0_-10px_12px_-8px_var(--background)]">
         <Button onClick={submit} disabled={(connected && !valid) || short} busy={isLoading}>
           {!connected ? "Connect wallet to create" : "Create circle"}
         </Button>

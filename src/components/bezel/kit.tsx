@@ -149,8 +149,9 @@ export function CodeBoxes({
       {slots.flatMap((c, i) => [
         // A spacer column splits the code into two groups of four without narrowing a box
         ...(i === half ? [<i key="gap" aria-hidden="true" />] : []),
+        // Empty boxes show a dot, not sample letters that read like a code already typed
         <span key={i} className={cn(i === caret && "bz-code-caret", !c && "bz-code-empty")} aria-hidden="true">
-          {c || (!focused && !value ? placeholder[i] : "")}
+          {c || (i === caret ? "" : <i className="bz-code-dot" />)}
         </span>,
       ])}
       <input

@@ -140,11 +140,11 @@
 
   html {
     scroll-padding-top: calc(62px + env(safe-area-inset-top));
-    scroll-padding-bottom: calc(80px + env(safe-area-inset-bottom));
+    scroll-padding-bottom: calc(96px + env(safe-area-inset-bottom));
   }
 
   html:has(.bz-sticky-cta) {
-    scroll-padding-bottom: calc(160px + env(safe-area-inset-bottom));
+    scroll-padding-bottom: calc(190px + env(safe-area-inset-bottom));
   }
 
   body {
@@ -567,7 +567,52 @@
 
   .bz-code span.bz-code-empty {
     color: var(--muted-foreground);
-    opacity: 0.72;
+  }
+
+  .bz-code-dot {
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+    background: currentColor;
+    opacity: 0.5;
+  }
+
+  /* "How joining works": numbered rings on a thin gold track */
+  .bz-steps {
+    display: grid;
+  }
+
+  .bz-steps li {
+    position: relative;
+    display: grid;
+    grid-template-columns: 34px minmax(0, 1fr);
+    gap: 14px;
+    padding-bottom: 18px;
+  }
+
+  .bz-steps li:not(:last-child)::before {
+    content: "";
+    position: absolute;
+    left: 16.5px;
+    top: 36px;
+    bottom: 2px;
+    width: 1px;
+    background: linear-gradient(var(--gold), transparent);
+    opacity: 0.45;
+  }
+
+  .bz-steps-num {
+    display: grid;
+    width: 34px;
+    height: 34px;
+    place-items: center;
+    border-radius: 50%;
+    font-family: var(--font-label);
+    font-size: 10px;
+    letter-spacing: 0.04em;
+    color: var(--gold-hi);
+    background: var(--card);
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--gold) 45%, transparent);
   }
 
   .bz-code span.bz-code-caret {
@@ -900,6 +945,117 @@
     color: var(--foreground);
     box-shadow: 0 -1px 0 var(--line-2), 0 -20px 50px -20px rgba(0, 0, 0, 0.6);
     animation: bz-rise 0.28s cubic-bezier(0.2, 0.8, 0.2, 1);
+  }
+}
+
+@layer components {
+  /* App bar: round bezel buttons and the wordmark in the dial's small caps */
+  .bz-ring-btn {
+    display: flex;
+    width: 40px;
+    height: 40px;
+    flex: none;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
+    color: var(--foreground);
+    background: color-mix(in srgb, var(--card) 72%, transparent);
+    box-shadow: inset 0 0 0 1px var(--border);
+    transition: transform 0.15s ease;
+  }
+
+  .bz-ring-btn:active {
+    transform: scale(0.94);
+  }
+
+  .bz-wordmark {
+    font-family: var(--font-label);
+    font-size: 14px;
+    font-weight: 400;
+    letter-spacing: 0.26em;
+    text-transform: uppercase;
+  }
+
+  /* Tab bar: a floating dock; Create is the gold coin set into it */
+  .bz-dock {
+    display: grid;
+    height: 64px;
+    grid-template-columns: 1fr 1fr 1fr;
+    align-items: stretch;
+    padding: 0 6px;
+    border-radius: 24px;
+    background: color-mix(in srgb, var(--sheet) 94%, transparent);
+    -webkit-backdrop-filter: blur(18px);
+    backdrop-filter: blur(18px);
+    box-shadow: inset 0 0 0 1px var(--line-2), 0 16px 34px -18px rgba(0, 0, 0, 0.7);
+  }
+
+  /* Every label sits on one baseline, the coin's included */
+  .bz-dock-item {
+    position: relative;
+    display: flex;
+    height: 64px;
+    flex-direction: column;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 3px;
+    padding-bottom: 10px;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.01em;
+    transition: color 0.2s ease;
+  }
+
+  .bz-dock-item > * {
+    position: relative;
+  }
+
+  /* The active side tab sits in a soft gold well */
+  .bz-dock-item:not(.bz-dock-coin)[data-active="true"]::before {
+    content: "";
+    position: absolute;
+    inset: 7px 14px;
+    border-radius: 17px;
+    background: color-mix(in srgb, var(--gold) 11%, transparent);
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--gold) 26%, transparent);
+  }
+
+  .bz-dock-coin {
+    justify-content: flex-end;
+  }
+
+  .bz-coin-btn {
+    position: absolute;
+    top: -20px;
+    left: 50%;
+    display: grid;
+    width: 54px;
+    height: 54px;
+    place-items: center;
+    border-radius: 50%;
+    color: #3a2905;
+    background: radial-gradient(circle at 34% 28%, #fff3cc 0%, #f2d27c 30%, #d4af37 58%, #9b7224 100%);
+    box-shadow:
+      inset 0 0 0 1.5px rgba(255, 243, 204, 0.6),
+      inset 0 -4px 7px rgba(110, 76, 18, 0.45),
+      0 0 0 4px var(--background),
+      0 12px 20px -8px rgba(0, 0, 0, 0.6);
+    transform: translateX(-50%);
+    transition: transform 0.15s ease, box-shadow 0.2s ease;
+  }
+
+  .bz-dock-coin:active .bz-coin-btn {
+    transform: translateX(-50%) scale(0.95);
+  }
+
+  /* On Create, a lume ring says where you are */
+  .bz-dock-coin[data-active="true"] .bz-coin-btn {
+    box-shadow:
+      inset 0 0 0 1.5px rgba(255, 243, 204, 0.6),
+      inset 0 -4px 7px rgba(110, 76, 18, 0.45),
+      0 0 0 3px var(--background),
+      0 0 0 5px var(--glow),
+      0 12px 20px -8px rgba(0, 0, 0, 0.6);
   }
 }
 

@@ -54,50 +54,61 @@ export function AppShell({ title, back, children }: AppShellProps) {
           scrolled && "shadow-[inset_0_-1px_0_var(--border)]"
         )}
       >
-        <div className="flex h-[54px] items-center gap-1.5 pl-4 pr-3.5">
+        <div className="flex h-[60px] items-center gap-2 px-4">
           {back ? (
             <button
               onClick={() => (inAppScreens > 1 ? router.back() : router.push("/"))}
-              className="bz-hit -ml-2 flex size-10 items-center justify-center rounded-full active:bg-secondary"
+              className="bz-ring-btn -ml-0.5"
               aria-label="Back"
             >
-              <Icon name="back" className="size-6" />
+              <Icon name="back" className="size-5" />
             </button>
           ) : (
-            <Link href="/" className="-ml-0.5 mr-1 flex shrink-0 items-center" aria-label="Arisan home">
+            <Link href="/" className="flex shrink-0 items-center" aria-label="Arisan home">
               {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src="/brand/seal-compact.svg" alt="" width={30} height={30} className="size-[30px]" />
+              <img src="/brand/seal-compact.svg" alt="" width={34} height={34} className="size-[34px]" />
             </Link>
           )}
-          <h1 className="flex-1 truncate pl-1 text-[17.5px] font-semibold tracking-[-0.01em]">{title ?? "Arisan"}</h1>
+          <h1
+            className={cn(
+              "min-w-0 flex-1 truncate",
+              back ? "pl-1 text-[17px] font-semibold tracking-[-0.01em]" : "bz-wordmark pl-1.5"
+            )}
+          >
+            {title ?? "Arisan"}
+          </h1>
           <ThemeToggle />
           <WalletChip />
         </div>
       </header>
 
       <WalletModalA11y />
-      <main className="flex-1 overflow-x-clip px-4 pb-[calc(6rem+env(safe-area-inset-bottom))] pt-1">{children}</main>
+      <main className="flex-1 overflow-x-clip px-4 pb-[calc(7rem+env(safe-area-inset-bottom))] pt-1">{children}</main>
 
-      <nav className="fixed inset-x-0 bottom-0 z-40 mx-auto w-full max-w-[480px] bg-background pb-[env(safe-area-inset-bottom)] shadow-[inset_0_1px_0_var(--border)]">
-        <ul className="grid grid-cols-3">
+      {/* A floating dock: Home and Join either side, Create as the gold coin in the middle */}
+      <nav className="pointer-events-none fixed inset-x-0 bottom-0 z-40 mx-auto w-full max-w-[480px] px-4 pb-[calc(10px+env(safe-area-inset-bottom))]">
+        <ul className="bz-dock pointer-events-auto">
           {NAV.map(({ href, label, icon }) => {
             // A circle's own page belongs to Home: that's where its card lives.
             const onCircle = pathname.startsWith("/pools/") && pathname !== "/pools/create";
             const active = href === "/" ? pathname === "/" || onCircle : pathname.startsWith(href);
+            const coin = href === "/pools/create";
             return (
               <li key={href}>
                 <Link
                   href={href}
                   data-active={active}
                   aria-current={active ? "page" : undefined}
-                  className={cn(
-                    "relative flex h-[62px] flex-col items-center justify-center gap-1 text-[11.5px] font-medium transition-colors",
-                    active ? "text-primary" : "text-muted-foreground"
-                  )}
+                  className={cn("bz-dock-item", coin && "bz-dock-coin", active ? "text-primary" : "text-muted-foreground")}
                 >
-                  {active && <span aria-hidden="true" className="absolute top-1 h-0.5 w-[18px] rounded-full bg-gold" />}
-                  <Icon name={icon} className="size-[25px]" />
-                  {label}
+                  {coin ? (
+                    <span aria-hidden="true" className="bz-coin-btn">
+                      <Icon name="plus" className="size-6" strokeWidth={2.2} />
+                    </span>
+                  ) : (
+                    <Icon name={icon} className="size-6" />
+                  )}
+                  <span>{label}</span>
                 </Link>
               </li>
             );

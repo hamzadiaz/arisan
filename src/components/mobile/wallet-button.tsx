@@ -21,8 +21,9 @@ export function WalletChip() {
       <button
         onClick={() => setVisible(true)}
         data-connect=""
-        className="bz-hit inline-flex h-8 shrink-0 items-center rounded-full px-3.5 text-[13px] font-semibold text-gold-hi shadow-[inset_0_0_0_1px_color-mix(in_srgb,var(--gold)_55%,transparent)] active:scale-[0.98]"
+        className="bz-hit inline-flex h-10 shrink-0 items-center gap-1.5 rounded-full pl-3 pr-3.5 text-[13.5px] font-semibold text-gold-hi shadow-[inset_0_0_0_1px_color-mix(in_srgb,var(--gold)_55%,transparent)] active:scale-[0.98]"
       >
+        <Icon name="wallet" className="size-4" />
         {connecting ? "Connecting…" : "Connect"}
       </button>
     );
@@ -33,7 +34,7 @@ export function WalletChip() {
     // Closed by a disconnect from the wallet's side too, so it can't reopen by itself later
     <Dialog.Root open={connected && open} onOpenChange={setOpen}>
       <Dialog.Trigger
-        className="bz-hit inline-flex h-8 shrink-0 items-center gap-2 rounded-full bg-card pl-2.5 pr-3 font-mono text-[12.5px] shadow-[inset_0_0_0_1px_var(--border)] active:scale-[0.98]"
+        className="bz-hit inline-flex h-10 shrink-0 items-center gap-2 rounded-full bg-card pl-3 pr-3.5 font-mono text-[12.5px] shadow-[inset_0_0_0_1px_var(--border)] active:scale-[0.98]"
         aria-label={`Wallet ${shortAddress(address)}`}
       >
         <span aria-hidden="true" className="bz-dot bz-dot-paid size-[7px]" />

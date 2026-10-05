@@ -15,11 +15,11 @@ const SEAT_DOTS: [number, number][] = [
 ];
 
 const PATHS = {
+  // Home is your circles: the coin with its pentagon emblem
   home: (
     <>
-      <circle cx="12" cy="12" r="8.4" />
-      <circle className="fill-on" cx="12" cy="12" r="3.8" />
-      <path d="M12 2v1.9M22 12h-1.9M12 22v-1.9M2 12h1.9" />
+      <circle cx="12" cy="12" r="8.6" />
+      <path className="fill-on" d="M12 7.2l4.6 3.3-1.75 5.4h-5.7L7.4 10.5z" />
     </>
   ),
   create: (
@@ -28,11 +28,15 @@ const PATHS = {
       <path d="M12 8.1v7.8M8.1 12h7.8" />
     </>
   ),
+  // Join is an invite: a ticket with its code and a tear line
   join: (
     <>
-      <circle cx="12" cy="12" r="8.4" strokeDasharray="1.3 3.1" />
-      <circle className="icon-solid" cx="12" cy="20.4" r="2.2" />
-      <path d="M12 6.8v6.8M9.3 11l2.7 2.6 2.7-2.6" />
+      <path
+        className="fill-on"
+        d="M4.6 6h14.8a1.6 1.6 0 0 1 1.6 1.6v2.6a1.8 1.8 0 0 0 0 3.6v2.6a1.6 1.6 0 0 1-1.6 1.6H4.6A1.6 1.6 0 0 1 3 16.4v-2.6a1.8 1.8 0 0 0 0-3.6V7.6A1.6 1.6 0 0 1 4.6 6z"
+      />
+      <path d="M7.6 12h.01M10.4 12h.01M13.2 12h.01" strokeWidth={2.4} />
+      <path d="M16.8 8.6v6.8" strokeDasharray="1.1 1.7" />
     </>
   ),
   history: (

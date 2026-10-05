@@ -17,10 +17,10 @@ export function ThemeToggle() {
     <button
       onClick={toggle}
       aria-label="Toggle theme"
-      className="bz-hit relative flex size-9 items-center justify-center rounded-full text-muted-foreground active:bg-secondary"
+      className="bz-ring-btn relative text-muted-foreground"
     >
-      <Icon name="sun" className="size-[19px] rotate-0 scale-100 transition-transform duration-300 dark:-rotate-90 dark:scale-0" />
-      <Icon name="moon" className="absolute size-[19px] rotate-90 scale-0 transition-transform duration-300 dark:rotate-0 dark:scale-100" />
+      <Icon name="sun" className="size-[18px] rotate-0 scale-100 transition-transform duration-300 dark:-rotate-90 dark:scale-0" />
+      <Icon name="moon" className="absolute size-[18px] rotate-90 scale-0 transition-transform duration-300 dark:rotate-0 dark:scale-100" />
     </button>
   );
 }

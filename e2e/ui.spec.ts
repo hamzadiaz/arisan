@@ -132,27 +132,26 @@ test.describe("5. Join", () => {
     await input.fill("ab-cd 12");
     await expect(input).toHaveValue("ABCD12");
     await expect(find).toBeDisabled();
+
+    // The eighth character looks the circle up by itself. The app's RPC is unreachable
+    // here: that must not read as "wrong code" (E2E-5)
     await input.fill("zzzz9999extra");
     await expect(input).toHaveValue("ZZZZ9999");
-    await expect(find).toBeEnabled();
+    await expect(page.getByRole("alert").filter({ hasText: "Can’t reach Solana" })).toBeVisible();
+    await expect(page.getByText("No circle with that code.")).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Try again" })).toBeEnabled();
+    await proof(page, "05a-join-network-error");
 
     await input.fill("");
     await page.evaluate(() => navigator.clipboard.writeText(" qwer-7890 "));
     await page.getByRole("button", { name: "Paste" }).click();
     await expect(input).toHaveValue("QWER7890");
-
-    // The app's RPC is unreachable here: that must not read as "wrong code" (E2E-5)
-    await find.click();
-    await expect(page.getByRole("alert").filter({ hasText: "Can’t reach Solana" })).toBeVisible();
-    await expect(page.getByText("No circle with that code.")).toHaveCount(0);
-    await proof(page, "05a-join-network-error");
   });
 
   test("a wrong code on a reachable network reports no match", async ({ page }) => {
     await mockRpcWithPool(page);
     await gotoReady(page, "/join");
     await page.getByPlaceholder("ABCD1234").fill("ZZZZ9999");
-    await page.getByRole("button", { name: "Find circle" }).click();
     await expect(page.getByText("No circle with that code.")).toBeVisible();
     await expect(page.getByText("Can’t reach Solana")).toHaveCount(0);
     await proof(page, "05c-join-no-match");
@@ -162,9 +161,8 @@ test.describe("5. Join", () => {
     await mockRpcWithPool(page);
     await gotoReady(page, "/join");
     await page.getByPlaceholder("ABCD1234").fill(MOCK_POOL.inviteCode.toLowerCase());
-    await page.getByRole("button", { name: "Find circle" }).click();
 
-    await expect(page.getByText(MOCK_POOL.name)).toBeVisible();
+    await expect(page.getByRole("heading", { name: MOCK_POOL.name })).toBeVisible();
     await expect(page.getByText("Filling")).toBeVisible();
     const fact = (label: string) => page.locator("dl > div", { hasText: label }).locator("dd");
     await expect(page.getByText("0.5 SOL", { exact: true }).first()).toBeVisible(); // per round

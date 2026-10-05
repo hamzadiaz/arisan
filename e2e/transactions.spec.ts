@@ -83,7 +83,6 @@ test.describe("Join pool transaction", () => {
     await gotoReady(page, "/join");
     await connectMockWallet(page);
     await page.getByPlaceholder("ABCD1234").fill(MOCK_POOL.inviteCode.toLowerCase());
-    await page.getByRole("button", { name: "Find circle" }).click();
     await page.getByRole("button", { name: "Join circle" }).click();
     await expect(page.getByText("Transaction failed")).toBeVisible();
     await expect(page).toHaveURL(/\/join$/);

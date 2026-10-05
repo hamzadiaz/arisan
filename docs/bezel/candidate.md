@@ -13,6 +13,8 @@ Design canvases (private): directions at https://claude.ai/artifact/17bwXGTQk7Ad
 - 28 icons drawn on the dial's geometry replace lucide in the shell, tabs and toasts.
 - A vector seal (the end-card coin redrawn) is the header mark; a 3D app icon is rendered from the live coin. Both are new files in `public/brand/`; Hamza's `logo.png`, `logo-mark.png` and icons are untouched and still used for the app icons.
 - Copy says "circle". Toasts are one title, one quiet line and an Explorer link.
+- The app bar has round bezel buttons for Back and theme, the ARISAN wordmark in the dial's small caps on Home, and a Connect chip with a wallet icon. The tab bar is a floating dock: Home (the coin and its pentagon) and Join (an invite ticket) either side of Create, a gold coin set into the dock.
+- Join leads with a dial that saves you a lit seat (then shows the found circle with your seat), dot placeholders instead of sample letters, a lookup that runs on the eighth character, and a short "how joining works" track.
 
 **Every program action, end to end**
 

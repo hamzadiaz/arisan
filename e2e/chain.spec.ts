@@ -146,8 +146,8 @@ test("a two-seat circle runs end to end through the UI on a real chain", async (
   await gotoReady(B, "/join");
   await connect(B, "Chain Guest");
   await B.getByPlaceholder("ABCD1234").fill(code);
-  await tap(B, "Find circle");
-  await expect(B.getByText("Chain circle")).toBeVisible({ timeout: 30_000 });
+  // The eighth character looks the circle up by itself
+  await expect(B.getByRole("heading", { name: "Chain circle" })).toBeVisible({ timeout: 30_000 });
   await tap(B, "Join circle");
   await expect(B.locator("header h1")).toHaveText("Chain circle", { timeout: 60_000 });
   await tap(B, /^Deposit stake · 0\.01 SOL/);
