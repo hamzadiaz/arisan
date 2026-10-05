@@ -1,6 +1,6 @@
 "use client";
 
-import { use, useCallback, useEffect, useRef, useState } from "react";
+import { use, useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import Link from "next/link";
 import { PublicKey } from "@solana/web3.js";
 import { useConnection, useWallet } from "@solana/wallet-adapter-react";
@@ -10,12 +10,15 @@ import { Dial } from "@/components/bezel/dial";
 import { Icon } from "@/components/bezel/icons";
 import { Button, EmptyState, Label, LowFunds, Note, SkeletonDial, SubDial } from "@/components/bezel/kit";
 import { HistoryGrid, LastDraw, SeatList } from "@/components/bezel/circle-parts";
+import { InviteCode, shareInvite } from "@/components/bezel/invite";
 import { EMPTY_DIAL, dialFromPool } from "@/components/bezel/dial-spec";
 import { DRAW_ERROR, parsePublicKey, useSolanaPoolActions, useSolanaPoolData } from "@/hooks/use-solana-program";
 import { useBalance } from "@/hooks/use-balance";
 import type { FetchedDraw, FetchedMember, FetchedPayment, FetchedPool } from "@/lib/solana/accounts";
 import { SLOT_HASH_WINDOW, circleAction, circleFacts, plural } from "@/lib/circle-state";
 import { addressExplorerLink, formatAmount, timeUntil } from "@/lib/format";
+import { readInviteFromChain, rememberInvite, savedInvite, subscribeInvites } from "@/lib/invites";
+import { PROGRAM_ID } from "@/lib/solana/program";
 import { dismissToast, poolToasts, txErrorToast } from "@/lib/solana/transaction-toast";
 import { cn } from "@/lib/utils";
 
@@ -55,6 +58,8 @@ const split = (amount: string) => {
   const i = amount.lastIndexOf(" ");
   return [amount.slice(0, i), amount.slice(i)] as const;
 };
+
+const noInvite = () => null;
 
 const when = (date: Date) =>
   date.toLocaleString("en-GB", { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
@@ -162,6 +167,30 @@ export default function PoolPage({ params }: { params: Promise<{ id: string }> }
     };
   }, [connection, committedSlot]);
 
+  // The invite code, for members and the host while seats are open. The pool keeps only its
+  // hash: this device may have the code from creating or joining, or it's read back from the
+  // create transaction.
+  const me = publicKey?.toBase58();
+  const invite = useSyncExternalStore(subscribeInvites, () => savedInvite(poolId), noInvite);
+  const [inviteMissing, setInviteMissing] = useState<string | null>(null);
+  const inviteRead = useRef<string | null>(null);
+  const filling = data?.pool?.status === "pending" && data.members.length < data.pool.maxMembers ? data : null;
+  const inviteHash =
+    filling && me && (filling.pool?.creatorId === me || filling.members.some((m) => m.walletAddress === me))
+      ? filling.pool?.inviteCodeHash
+      : undefined;
+  useEffect(() => {
+    if (!inviteHash || invite || inviteRead.current === poolId) return;
+    inviteRead.current = poolId;
+    readInviteFromChain(connection, new PublicKey(poolId), PROGRAM_ID, inviteHash).then(
+      (code) => (code ? rememberInvite(poolId, code) : setInviteMissing(poolId)),
+      (error) => {
+        console.warn("Couldn't read the invite code back:", error);
+        setInviteMissing(poolId);
+      }
+    );
+  }, [connection, poolId, invite, inviteHash]);
+
   const refresh = async () => {
     setRefreshing(true);
     await load();
@@ -223,7 +252,6 @@ export default function PoolPage({ params }: { params: Promise<{ id: string }> }
     );
   }
 
-  const me = publicKey?.toBase58();
   const f = circleFacts(pool, members, payments, draws, me, now);
   const myMember = f.myMember;
   const next = circleAction(pool, f, connected);
@@ -370,12 +398,18 @@ export default function PoolPage({ params }: { params: Promise<{ id: string }> }
       );
       break;
     case "join":
-      primary = (
-        <Link href="/join" className="bz-button bz-button-gold">
-          Join with code
-        </Link>
-      );
-      if (f.isAuthority) hint = "Take your seat with the invite code.";
+      // The host's code is known here: their seat is one tap away on Join
+      primary =
+        f.isAuthority && invite ? (
+          <Link href={`/join?code=${invite}`} className="bz-button bz-button-gold">
+            Take your seat
+          </Link>
+        ) : (
+          <Link href="/join" className="bz-button bz-button-gold">
+            Join with code
+          </Link>
+        );
+      if (f.isAuthority && !invite) hint = "Take your seat with the invite code.";
       break;
     case "stake":
       primary = (
@@ -594,7 +628,8 @@ export default function PoolPage({ params }: { params: Promise<{ id: string }> }
         </div>
       </div>
     ) : (
-      <button ref={leaveTrigger} onClick={() => setConfirmLeave(true)} className="bz-link bz-hit mx-auto mt-2 flex min-h-11 items-center text-[13.5px] text-muted-foreground">
+      <button ref={leaveTrigger} onClick={() => setConfirmLeave(true)} className="bz-button bz-button-ghost bz-button-sm mx-auto mt-3">
+        <Icon name="leave" className="size-4" />
         Leave circle
       </button>
     );
@@ -602,11 +637,16 @@ export default function PoolPage({ params }: { params: Promise<{ id: string }> }
   // After the circle completes, anyone's leftover stakes can go back in one tap.
   if (action.kind === "refund" && f.stakesLeft.length > 0) {
     secondary = (
-      <button onClick={returnAll} disabled={busy} className="bz-link bz-hit mx-auto mt-2 flex min-h-11 items-center text-[13.5px] text-muted-foreground">
+      <button onClick={returnAll} disabled={busy} className="bz-button bz-button-ghost bz-button-sm mx-auto mt-3">
+        <Icon name="coin" className="size-4" />
         {f.stakesLeft.length === 1 ? "Return the last stake" : `Return ${f.stakesLeft.length} stakes`}
       </button>
     );
   }
+
+  // Inviting is for members (and the host) while seats are open
+  const showInvite = pool.status === "pending" && !f.full && (!!myMember || f.isAuthority);
+  const inviteLoading = !invite && inviteMissing !== poolId && !!pool.inviteCodeHash;
 
   const [potNum, potUnit] = split(amount(f.pot));
   const lastDraw = draws.length ? draws.reduce((a, b) => (b.round > a.round ? b : a)) : null;
@@ -665,6 +705,20 @@ export default function PoolPage({ params }: { params: Promise<{ id: string }> }
       {note}
       {primary && <div className="mt-4">{primary}</div>}
       {hint && <div className="bz-help text-center">{hint}</div>}
+      {showInvite &&
+        (invite ? (
+          <div className="mt-5 flex flex-col">
+            <Label className="text-center">Invite code</Label>
+            <InviteCode code={invite} compact className="mt-2" />
+            <Button tone="ghost" icon="share" className="mt-3" onClick={() => shareInvite(pool.name, invite)}>
+              Share invite
+            </Button>
+          </div>
+        ) : inviteLoading ? (
+          <div className="bz-skel mt-5 h-[150px] rounded-[20px]" aria-hidden="true" />
+        ) : f.isAuthority ? (
+          <p className="bz-help text-center">Share the invite code you saved when you created the circle.</p>
+        ) : null)}
       {secondary}
 
       {lastDraw && <LastDraw draw={lastDraw} me={me} currency={pool.currency} />}

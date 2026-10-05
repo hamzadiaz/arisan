@@ -57,6 +57,8 @@ export interface FetchedPool extends Pool {
   /** Round whose draw randomness is committed; equals currentRound mid-draw. */
   randomnessRound: number;
   randomnessSlot: number;
+  /** SHA-256 of the invite code; the code itself isn't in the account */
+  inviteCodeHash?: number[];
 }
 
 export async function fetchPool(
@@ -108,6 +110,7 @@ export async function fetchPool(
       stakeMultiplier: pool.stakeMultiplier,
       randomnessRound: pool.randomnessRound ?? 0,
       randomnessSlot: pool.randomnessSlot ? pool.randomnessSlot.toNumber() : 0,
+      inviteCodeHash: pool.inviteCodeHash ? Array.from(pool.inviteCodeHash) : undefined,
     };
   } catch (error) {
     // Check if this is a buffer/deserialization error (likely old pool format)

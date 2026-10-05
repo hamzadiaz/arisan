@@ -4,8 +4,9 @@ Checked 2026-10-05 against `https://api.devnet.solana.com`.
 
 ## What's on devnet
 
-- Since `698cbc3` (5 Oct) the app points at `Aw54KXqUyccCACmmry5MmCmTzqJqKfmnL868aMpJaGbB`, which Hamza deployed from `main` at `fc0abe4` (PR #23 included), slot 507,819,846. Upgrade authority `AMrVdasczrafDFiF3YgYNtNeEw6vvURzrK1AipP3bPnW`; the program data holds 479,624 bytes.
-- Not on it yet: the `execute_draw` follow-up (`44ca78d`: removed seats don't hold the draw, and a circle completes once no one left can win). The app on `main` already follows that rule, so upgrade the program before, or with, the next site deploy (see Upgrade). With the app ahead of the program, a circle with a removed seat would commit a draw the program then refuses, and an unfinished commit locks the circle. A removal needs a 48-hour grace first.
+- Since `698cbc3` (5 Oct) the app points at `Aw54KXqUyccCACmmry5MmCmTzqJqKfmnL868aMpJaGbB`, which Hamza deployed from `main` at `fc0abe4` (PR #23 included). Upgrade authority `AMrVdasczrafDFiF3YgYNtNeEw6vvURzrK1AipP3bPnW`.
+- He upgraded it at 19:20:58 UTC (slot 507,835,118), 19 seconds before committing `948fa41` (1-minute rounds), which sits on the `execute_draw` follow-up (`44ca78d`: removed seats don't hold the draw, and a circle completes once no one left can win). The program data now holds 489,864 bytes.
+- Keep the program and the app in step: the app follows the program's draw rule, and a draw the program refuses after its commit locks that circle.
 - The previous program, `BjxGBSpEULzq9kJfx3bGB1rpVHwta8QuP2jeVKow3wN6` (last deployed 2025-12-12, authority `CaJpp31WNCQAZPt11BY13Eqyu1vxPnnJYHDyhXmWwud6`), stays on chain and the app no longer uses it. It predated the 2026-09-28 fixes (`aca7d1f` bound draw, `f77e322` invite code as return data, `1dcca50` only start full pools): against it the app could create a circle but not read it back, show its invite code or draw.
 
 ## The repo's program, run locally
@@ -38,7 +39,7 @@ Result: `arisan_contracts.so`, 477,496 bytes (`main` with PR #23 and the follow-
 
 ## Upgrade (needs the upgrade authority's key)
 
-Build from `main` (the program ID comes from `declare_id!`, so build after `698cbc3`). The follow-up build is 477,496 bytes, under the 479,624 the program data holds, so no extend is needed:
+Build from `main` (the program ID comes from `declare_id!`, so build after `698cbc3`). This recipe's build of `main` is 477,496 bytes, under the 489,864 the program data holds, so no extend is needed:
 
 ```sh
 solana config set -u devnet -k <upgrade-authority keypair>
@@ -65,4 +66,4 @@ NEXT_PUBLIC_SOLANA_RPC_URL=http://127.0.0.1:18899 npx next build && npx next sta
 CHAIN_RPC=http://127.0.0.1:18899 PW_NO_SERVER=1 E2E_PORT=3121 npx playwright test e2e/chain.spec.ts
 ```
 
-Two browsers with wallets that sign for real run a whole two-seat circle: about 13 minutes, because rounds are 5 minutes on-chain.
+Two browsers with wallets that sign for real run a whole two-seat circle: about 13 minutes when rounds were 5 minutes on-chain; since `948fa41` they're 1 minute.

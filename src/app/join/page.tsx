@@ -15,6 +15,7 @@ import { useSolanaPoolActions, useSolanaPoolData } from "@/hooks/use-solana-prog
 import { useBalance } from "@/hooks/use-balance";
 import type { FetchedPool } from "@/lib/solana/accounts";
 import { formatAmount } from "@/lib/format";
+import { rememberInvite } from "@/lib/invites";
 import { poolToasts, txErrorToast, dismissToast } from "@/lib/solana/transaction-toast";
 
 const CODE_LENGTH = 8;
@@ -180,9 +181,12 @@ export default function JoinPage() {
     const result = await joinPool({ poolAddress: new PublicKey(pool.onChainAddress), inviteCode: code });
     dismissToast(toastId);
     if (result.success) {
+      // Members can share the code from the circle page
+      rememberInvite(pool.onChainAddress, code);
       poolToasts.joined(result.signature!);
       if (alive.current) router.push(`/pools/${pool.onChainAddress}`);
     } else if (/already in use/i.test(result.error ?? "")) {
+      rememberInvite(pool.onChainAddress, code);
       toast("You’re already in this circle");
       if (alive.current) router.push(`/pools/${pool.onChainAddress}`);
     } else {

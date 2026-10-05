@@ -5,14 +5,15 @@ import { useRouter } from "next/navigation";
 import { PublicKey } from "@solana/web3.js";
 import { useWallet } from "@solana/wallet-adapter-react";
 import { useWalletModal } from "@solana/wallet-adapter-react-ui";
-import { toast } from "sonner";
 import { AppShell } from "@/components/mobile/app-shell";
 import { Dial } from "@/components/bezel/dial";
 import { Icon } from "@/components/bezel/icons";
 import { Button, Label, LowFunds, Note, SeatRuler, Segmented } from "@/components/bezel/kit";
+import { InviteCode, shareInvite } from "@/components/bezel/invite";
 import { useSolanaPoolActions } from "@/hooks/use-solana-program";
 import { useBalance } from "@/hooks/use-balance";
 import { clampUtf8, formatAmount, sanitizeAmountInput } from "@/lib/format";
+import { rememberInvite } from "@/lib/invites";
 import { getExplorerLink } from "@/lib/solana/instructions";
 import { cn } from "@/lib/utils";
 import { poolToasts, txErrorToast, dismissToast } from "@/lib/solana/transaction-toast";
@@ -91,6 +92,8 @@ function CreateForm({ onCreated }: { onCreated: (c: Created) => void }) {
     dismissToast(toastId);
 
     if (result.success && result.poolAddress) {
+      // The circle page shows the code to members later; this device has it now
+      if (result.inviteCode) rememberInvite(result.poolAddress, result.inviteCode);
       onCreated({
         poolAddress: result.poolAddress,
         inviteCode: result.inviteCode,
@@ -202,34 +205,12 @@ function CreateForm({ onCreated }: { onCreated: (c: Created) => void }) {
 function InviteOnce({ created }: { created: Created }) {
   const router = useRouter();
   const { joinPool, isLoading: joining } = useSolanaPoolActions();
-  const [copied, setCopied] = useState(false);
   const [seated, setSeated] = useState(false);
   const code = created.inviteCode;
   const open = () => router.push(`/pools/${created.poolAddress}`);
 
-  const copy = async () => {
-    if (!code) return;
-    await navigator.clipboard.writeText(code);
-    setCopied(true);
-    toast.success("Invite code copied");
-    setTimeout(() => setCopied(false), 2000);
-  };
-
-  const share = async () => {
-    if (!code) return;
-    // The link opens Join with the code filled in; the code is in the text too
-    const url = `${window.location.origin}/join?code=${code}`;
-    const text = `Join my Arisan circle “${created.name}” with code ${code}`;
-    if (navigator.share) {
-      await navigator.share({ title: "Arisan invite", text, url }).catch(() => {});
-    } else {
-      await navigator.clipboard.writeText(`${text}: ${url}`);
-      toast.success("Invite link copied");
-    }
-  };
-
   // The creator isn't seated by create_pool; joining with the code takes the first seat.
-  // Stay here afterwards: this screen is the only place the code is shown.
+  // Stay here afterwards: the code and Share stay in reach while the seat lands.
   const takeSeat = async () => {
     if (!code) return;
     const toastId = poolToasts.joining();
@@ -260,7 +241,7 @@ function InviteOnce({ created }: { created: Created }) {
       <div className="flex flex-col items-center pt-3 text-center">
         <Dial spec={ring} size={170} view="create" label={`${created.name}: ${created.seats} open seats`} />
         <h2 className="bz-title mt-3">Couldn&rsquo;t read the invite code.</h2>
-        <p className="bz-body mt-1.5 max-w-[30ch]">The circle exists, but nobody can join without the code.</p>
+        <p className="bz-body mt-1.5 max-w-[30ch]">The circle exists. Its page shows the code once Solana has it.</p>
         <Button className="mt-6" onClick={open}>
           Open circle
         </Button>
@@ -274,19 +255,10 @@ function InviteOnce({ created }: { created: Created }) {
       <h2 className="bz-title mt-2 truncate text-center">{created.name}</h2>
 
       <Label className="mt-5 text-center">Invite code</Label>
-      <button
-        onClick={copy}
-        className="mt-2 flex flex-col items-center rounded-[20px] bg-card px-4 py-4 shadow-[inset_0_0_0_1px_color-mix(in_srgb,var(--gold)_40%,transparent)] active:scale-[0.99]"
-      >
-        <span className="pl-[0.3em] font-mono text-[32px] font-medium tracking-[0.3em] text-gold-hi">{code}</span>
-        <span className="mt-1.5 flex items-center gap-1.5 text-[13px] text-muted-foreground">
-          <Icon name={copied ? "check" : "copy"} className="size-3.5" />
-          {copied ? "Copied" : "Tap to copy"}
-        </span>
-      </button>
+      <InviteCode code={code} className="mt-2" />
 
       <Note tone="gold" icon="info" className="mt-3">
-        Shown once. Save it now.
+        It stays on the circle page until every seat is taken.
       </Note>
 
       {seated ? (
@@ -299,7 +271,7 @@ function InviteOnce({ created }: { created: Created }) {
           {created.joinStake > 0 ? `Take your seat · ${formatAmount(created.joinStake, "SOL")} stake` : "Take your seat"}
         </Button>
       )}
-      <Button tone={seated ? "gold" : "ghost"} icon="share" className="mt-3" onClick={share}>
+      <Button tone={seated ? "gold" : "ghost"} icon="share" className="mt-3" onClick={() => shareInvite(created.name, code)}>
         Share invite
       </Button>
       <button onClick={open} className="bz-link mx-auto mt-4 h-11">

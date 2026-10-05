@@ -212,8 +212,8 @@ export function useSolanaPoolActions() {
         if (fetchLogs) {
           try {
             // The RPC often has not indexed a just-confirmed transaction yet. For
-            // createPool this read is the only copy of the invite code (only its hash is
-            // on-chain), so poll instead of giving up after one attempt.
+            // createPool this read is where the creator first sees the invite code (the pool
+            // keeps only its hash), so poll instead of giving up after one attempt.
             let txDetails = null;
             for (let attempt = 0; attempt < TX_READBACK_ATTEMPTS && !txDetails; attempt++) {
               if (attempt > 0) await new Promise((resolve) => setTimeout(resolve, TX_READBACK_DELAY_MS));

@@ -88,9 +88,57 @@ test.describe("Pending pool", () => {
   test("a member can leave before the start, after confirming", async ({ page }) => {
     await openPool(page, { members: [{ wallet: me, stakeDeposited: true }, { wallet: other, stakeDeposited: true }] });
     await expect(main(page).getByRole("button", { name: "Staked · 3 seats open" })).toBeDisabled();
+    // Styled as a button, not a line of text (Hamza's note)
+    await expect(main(page).getByRole("button", { name: "Leave circle" })).toHaveClass(/bz-button/);
     await main(page).getByRole("button", { name: "Leave circle" }).click();
     await expect(main(page).getByText("Your 0.5 SOL stake comes back to you.")).toBeVisible();
     await expectSigned(page, "Leave", /^leave_?[pP]ool$/);
+  });
+});
+
+test.describe("Invite on the circle page", () => {
+  // Only the code's hash is in the pool account: the page reads the code back from the
+  // circle's create transaction, or from this device if it created or joined the circle
+  test("members see the code while seats are open, and can copy and share it", async ({ page, context }) => {
+    await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+    await openPool(page, { members: [{ wallet: me, stakeDeposited: true }, { wallet: other, stakeDeposited: true }], inviteOnChain: true });
+    await main(page).getByText(MOCK_POOL.inviteCode).click();
+    await expect(main(page).getByText("Copied", { exact: true })).toBeVisible();
+    expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(MOCK_POOL.inviteCode);
+    await expect(main(page).getByRole("button", { name: "Share invite" })).toBeEnabled();
+    await proof(page, "p-invite");
+  });
+
+  test("a code this device saved shows without reading the chain", async ({ page }) => {
+    await page.addInitScript(
+      ([pool, code]) => localStorage.setItem("arisan.invites.v1", JSON.stringify({ [pool]: code })),
+      [MOCK_POOL.address.toBase58(), MOCK_POOL.inviteCode]
+    );
+    await openPool(page, { members: [{ wallet: me, stakeDeposited: true }, { wallet: other, stakeDeposited: true }] });
+    await expect(main(page).getByText(MOCK_POOL.inviteCode)).toBeVisible();
+  });
+
+  test("a visitor doesn't see the code", async ({ page }) => {
+    await openPool(page, { members: [{ wallet: other, stakeDeposited: true }], inviteOnChain: true });
+    await expect(main(page).getByRole("link", { name: "Join with code" })).toBeVisible();
+    await expect(page.getByText(MOCK_POOL.inviteCode)).toHaveCount(0);
+  });
+
+  test("the host's own seat is one tap away", async ({ page }) => {
+    await openPool(page, { authority: me, members: [{ wallet: other, stakeDeposited: true }], inviteOnChain: true });
+    await expect(main(page).getByRole("link", { name: "Take your seat" })).toHaveAttribute("href", `/join?code=${MOCK_POOL.inviteCode}`);
+    await expect(main(page).getByText(MOCK_POOL.inviteCode)).toBeVisible();
+  });
+
+  test("a full circle doesn't offer the invite", async ({ page }) => {
+    await openPool(page, {
+      authority: me,
+      maxMembers: 2,
+      members: [{ wallet: me, stakeDeposited: true }, { wallet: other, stakeDeposited: true }],
+      inviteOnChain: true,
+    });
+    await expect(main(page).getByRole("button", { name: "Start circle" })).toBeEnabled();
+    await expect(main(page).getByRole("button", { name: "Share invite" })).toHaveCount(0);
   });
 });
 

@@ -60,6 +60,8 @@ export const MOCK_POOL = {
 };
 
 /** Minimal confirmed-transaction RPC result carrying program return data. */
+const CREATE_SIGNATURE = utils.bytes.bs58.encode(Buffer.alloc(64, 7));
+
 function confirmedTransaction(signature: string, returnData: string) {
   return {
     slot: 1,
@@ -131,6 +133,8 @@ export interface MockScenario {
   vaultLamports?: number;
   /** Sent transactions land but fail (confirmation carries an error). */
   sendFails?: boolean;
+  /** The pool's history holds its create transaction, with the invite code as return data. */
+  inviteOnChain?: boolean;
 }
 
 const pda = (seeds: (Buffer | Uint8Array)[]) =>
@@ -313,7 +317,12 @@ export async function mockRpcWithPool(page: Page, initial: MockScenario = {}) {
             confirmationStatus: "confirmed",
           })),
         };
+      case "getSignaturesForAddress":
+        return scenario.inviteOnChain && params[0] === MOCK_POOL.address.toBase58()
+          ? [{ signature: CREATE_SIGNATURE, slot: 1, err: null, memo: null, blockTime: 1_750_000_000, confirmationStatus: "finalized" }]
+          : [];
       case "getTransaction": {
+        if (scenario.inviteOnChain && params[0] === CREATE_SIGNATURE) return confirmedTransaction(CREATE_SIGNATURE, MOCK_POOL.inviteCode);
         const sent = scenario.sentTx;
         if (!sent || txLookups++ < sent.indexedAfter) return null;
         return confirmedTransaction(params[0] as string, sent.returnData);

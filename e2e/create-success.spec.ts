@@ -11,8 +11,8 @@ import {
 } from "./helpers";
 import idl from "../src/lib/solana/idl.json";
 
-// Create → invite shown once. The mock wallet "sends" (signAndSendTransaction) and the
-// fake chain confirms; the invite code comes back only through transaction return data.
+// Create → the invite. The mock wallet "sends" (signAndSendTransaction) and the fake chain
+// confirms; the invite code comes back only through transaction return data.
 
 const PROGRAM_ID = new PublicKey((idl as { address: string }).address);
 const expectedPool = PublicKey.findProgramAddressSync(
@@ -28,7 +28,7 @@ async function createPool(page: import("@playwright/test").Page) {
   await page.getByRole("button", { name: "Create circle" }).click();
 }
 
-test("the invite code is shown once, copies, and opens the pool (E2E-13)", async ({
+test("the invite code is shown, copies, is kept for the circle page, and opens the pool (E2E-13)", async ({
   page,
   context,
 }) => {
@@ -41,8 +41,10 @@ test("the invite code is shown once, copies, and opens the pool (E2E-13)", async
   await expect(page.locator("header h1")).toHaveText("Circle created", { timeout: 20_000 });
   await expect(page.getByRole("heading", { name: "Office lunch" })).toBeVisible();
   await expect(page.getByText("Q7K2M9XA")).toBeVisible();
-  await expect(page.getByText("Shown once. Save it now.")).toBeVisible();
+  await expect(page.getByText("It stays on the circle page until every seat is taken.")).toBeVisible();
   await proof(page, "c-invite-shown-once");
+  // This device keeps it for the circle page
+  expect(await page.evaluate(() => localStorage.getItem("arisan.invites.v1"))).toContain("Q7K2M9XA");
 
   await page.getByText("Q7K2M9XA").click();
   await expect(page.getByText("Copied", { exact: true })).toBeVisible();
@@ -62,7 +64,7 @@ test("Take your seat joins the new circle with the code just shown", async ({ pa
   await expect(page.getByText("Q7K2M9XA")).toBeVisible({ timeout: 20_000 });
 
   await page.getByRole("button", { name: "Take your seat" }).click();
-  // The code is shown only here, so the screen stays: seated, with Share and the code still on it
+  // The screen stays: seated, with Share and the code still on it
   await expect(page.getByRole("button", { name: "You’re seated" })).toBeDisabled({ timeout: 20_000 });
   await expect(page.getByText("Q7K2M9XA")).toBeVisible();
   await expect(page).toHaveURL(/\/pools\/create$/);
@@ -99,6 +101,6 @@ test("if the code never comes back the screen says so, and invents nothing", asy
 
   await expect(page.locator("header h1")).toHaveText("Circle created", { timeout: 40_000 });
   await expect(page.getByText("Couldn’t read the invite code.")).toBeVisible();
-  await expect(page.getByText("Shown once.")).toHaveCount(0);
+  await expect(page.getByText("It stays on the circle page")).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Open circle" })).toBeVisible();
 });
