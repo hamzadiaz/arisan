@@ -586,13 +586,15 @@ export function useSolanaPoolActions() {
               })
             );
           });
-        // The program draws only once every seat on the roster has paid this round
-        const everyonePaid = async () => {
+        // The program draws only once every seat still in has paid this round (removed seats can't pay)
+        const everyonePaid = async (members: ({ isKicked: boolean } | null)[]) => {
           const infos = await connection.getMultipleAccountsInfo(
             roster.map((wallet) => getPaymentPDA(params.poolAddress, wallet, params.round)[0]),
             "confirmed"
           );
-          return infos.every((info) => !!info && info.owner.equals(program.programId) && info.data.length > 0);
+          return infos.every(
+            (info, i) => members[i]?.isKicked || (!!info && info.owner.equals(program.programId) && info.data.length > 0)
+          );
         };
         // The vault pays contribution × member_count and must still hold every stake owed back.
         const vaultFor = async (members: any[]) => {
@@ -608,10 +610,10 @@ export function useSolanaPoolActions() {
 
         if (poolAccount.randomnessRound !== params.round) {
           // Step one: commit. Nothing here can be undone, so check everything first.
-          if (!(await everyonePaid())) {
+          const members = await readMembers();
+          if (!(await everyonePaid(members))) {
             return { success: false, error: DRAW_ERROR.unpaid };
           }
-          const members = await readMembers();
           if (eligibleOf(members).length === 0) {
             return { success: false, error: DRAW_ERROR.noWinner };
           }
@@ -664,11 +666,10 @@ export function useSolanaPoolActions() {
           return { success: false, error: DRAW_ERROR.notReady, committed };
         }
         // The program refuses to finish while any seat owes this round: don't send a sure failure
-        if (!(await everyonePaid())) {
+        const members = await readMembers();
+        if (!(await everyonePaid(members))) {
           return { success: false, error: DRAW_ERROR.unpaid, committed };
         }
-
-        const members = await readMembers();
         const eligible = eligibleOf(members);
         if (eligible.length === 0) {
           return { success: false, error: DRAW_ERROR.noWinner, committed };

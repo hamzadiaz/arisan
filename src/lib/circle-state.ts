@@ -32,11 +32,11 @@ export interface CircleFacts {
   toKick: FetchedMember[];
   /** The round's deadline has passed (anyone may finish a started draw) */
   pastDeadline: boolean;
-  /** Seats that haven't paid this round, removed ones included: the draw needs every one */
+  /** Seats still in that haven't paid this round: the draw needs every one */
   uncovered: number;
-  /** Marking every unpaid seat would leave nobody able to win: wait for them to pay instead */
-  markLeavesNoWinner: boolean;
-  /** Seats that haven't paid this round: the program draws only once every one has */
+  /** Missed seats left unmarked: they're the last ones that can win, so the round waits for them */
+  spared: FetchedMember[];
+  /** Seats still in that haven't paid this round: the program draws only once every one has */
   waitingOn: FetchedMember[];
   /** Seats that can still win this round */
   eligible: number;
@@ -77,6 +77,7 @@ export function circleFacts(
       inGracePeriod: m.inGracePeriod,
       inDefault: m.inDefault,
       graceDeadline: m.graceDeadline ? seconds(m.graceDeadline) : 0,
+      hasWon: m.hasWon,
     })),
     { nowSec: now / 1000, marginSec: 60 }
   );
@@ -86,11 +87,8 @@ export function circleFacts(
   const committed = active && pool.randomnessRound === pool.currentRound && pool.currentRound > 0;
   const toMark = drawDue ? seated.filter((m) => settled.toMark.includes(m.walletAddress)) : [];
   const toKick = toMark.filter((m) => settled.toKick.includes(m.walletAddress));
-  const canWin = (m: FetchedMember) => !m.hasWon && !m.inDefault && !m.inGracePeriod;
-  // A marked seat can't win; if the unpaid seats are the only ones left to win, marking them
-  // stalls the round (and removing them later locks the circle). Wait for them to pay.
-  const markLeavesNoWinner = toMark.length > 0 && seated.filter((m) => canWin(m) && !toMark.includes(m)).length === 0;
-  const waitingOn = members.filter((m) => settled.waiting.includes(m.walletAddress));
+  const spared = drawDue ? seated.filter((m) => settled.spared.includes(m.walletAddress)) : [];
+  const waitingOn = seated.filter((m) => settled.waiting.includes(m.walletAddress));
   const eligible = seated.filter((m) => !m.hasWon && !m.inDefault && !m.inGracePeriod).length;
   const canDraw = drawDue && !committed && waitingOn.length === 0 && eligible > 0;
 
@@ -116,7 +114,7 @@ export function circleFacts(
     toKick,
     pastDeadline: active && now > pool.nextDrawDate.getTime(),
     uncovered: active ? settled.waiting.length : 0,
-    markLeavesNoWinner,
+    spared,
     waitingOn,
     eligible,
     canDraw,
@@ -173,7 +171,7 @@ export function circleAction(pool: FetchedPool, f: CircleFacts, connected: boole
     // A started draw locks the circle if nobody finishes it within 512 slots. The program
     // lets the host finish at any time and everyone else once the deadline has passed.
     if (f.committed) return { kind: f.pastDeadline || f.isAuthority ? "finish" : "finishLater" };
-    if ((m || f.isAuthority) && f.toMark.length > 0 && !f.markLeavesNoWinner) return { kind: "mark" };
+    if ((m || f.isAuthority) && f.toMark.length > 0) return { kind: "mark" };
     if ((m || f.isAuthority) && f.canDraw) return { kind: "draw" };
     return m ? { kind: "paid" } : { kind: "closed" };
   }

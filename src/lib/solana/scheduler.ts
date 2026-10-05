@@ -333,10 +333,10 @@ export async function executeDraw(
       return infos.map((info) => (info ? (program.coder.accounts.decode(memberName, info.data) as OnChainMember) : null));
     };
 
-    // Settle the round before committing: seats that missed it are marked, so their slashed
-    // stake covers the pot and they can't win it; a seat still in grace from an earlier round
-    // holds the draw. The app follows the same rule (round-settlement.ts). A commit already
-    // made for this round skips straight to the execute: it expires in 512 slots.
+    // Settle the round before committing: seats that missed it are marked (stake slashed, 48-hour
+    // grace) and removed once that grace is over. The draw waits for every seat still in to pay.
+    // The app follows the same rule (round-settlement.ts). A commit already made for this round
+    // skips straight to the execute: it expires in 512 slots.
     // Manual circles are drawn by their members; the cron only finishes a draw someone started
     if (!poolAccount.autoMode && poolAccount.randomnessRound !== round) {
       return skip("Manual circle: nothing started to finish");
@@ -365,6 +365,7 @@ export async function executeDraw(
           inGracePeriod: !!members[i]?.inGracePeriod,
           inDefault: !!members[i]?.inDefault,
           graceDeadline: members[i]?.graceDeadline ? Number(members[i]!.graceDeadline.toString()) : 0,
+          hasWon: !!members[i]?.hasWon,
         }));
       };
 
@@ -392,7 +393,7 @@ export async function executeDraw(
       }
 
       const { waiting } = settleRound(await seatsOf(), rules);
-      // The program draws only once every seat on the roster has paid this round
+      // The program draws only once every seat still in has paid this round
       if (waiting.length > 0) return skip(`Waiting for ${waiting.length} seat(s) to pay`);
     }
 

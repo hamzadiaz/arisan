@@ -259,8 +259,17 @@ test.describe("Draw, missed payments and refunds", () => {
 
   test("a seat whose grace is over is removed, and the button says so", async ({ page }) => {
     await openPool(page, due([staked(me), { wallet: other, inGracePeriod: true, graceEndsIn: -3_600 }], [me]));
-    await expect(main(page).getByText("The draw still waits for them to rejoin and pay.", { exact: false })).toBeVisible();
+    await expect(
+      main(page).getByText("the draw goes on without them. They lose their turn unless they rejoin.", { exact: false })
+    ).toBeVisible();
     await expectSigned(page, "Remove 1 seat", /^mark_?[dD]efaulter$/);
+  });
+
+  // The program skips removed seats: they can't pay, and the pot leaves them out
+  test("a removed seat doesn't hold the draw", async ({ page }) => {
+    await openPool(page, due([staked(me), staked(other), { wallet: third, isKicked: true }], [me, other]));
+    await expect(subDial(page, "Draw")).toContainText("Ready");
+    await expectSigned(page, "Draw now", /^commit_?[dD]raw_?[rR]andomness$/);
   });
 
   test("with a draw started, an unpaid member pays first", async ({ page }) => {
@@ -283,6 +292,15 @@ test.describe("Draw, missed payments and refunds", () => {
     });
     await expect(main(page).getByRole("button", { name: /^Mark|^Remove/ })).toHaveCount(0);
     await expect(main(page).getByText("Waiting for 1 seat to pay: it’s the only one left that can win.")).toBeVisible();
+  });
+
+  test("a seat that already won is still marked while the last one that can win owes the round", async ({ page }) => {
+    await openPool(page, {
+      ...due([{ wallet: me, stakeDeposited: true, hasWon: true }, staked(other), { wallet: third, stakeDeposited: true, hasWon: true }], [me]),
+      currentRound: 3,
+    });
+    // Only the seat that already won: the other is the last one left that can win
+    await expectSigned(page, "Mark missed payment", /^mark_?[dD]efaulter$/);
   });
 
   test("the host pays before finishing a draw started early: the program needs every seat paid", async ({ page }) => {

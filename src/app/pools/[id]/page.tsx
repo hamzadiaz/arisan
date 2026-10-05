@@ -501,7 +501,7 @@ export default function PoolPage({ params }: { params: Promise<{ id: string }> }
     case "mark": {
       const all = f.toMark.length;
       const kicks = f.toKick.length;
-      // A removed seat that hasn't won is still owed a round: total_rounds never shrinks
+      // A removed seat that hasn't won loses its turn unless it rejoins
       const owedTurn = f.toKick.some((m) => !m.hasWon);
       primary = (
         <Button tone="ghost" icon="alert" onClick={mark} busy={busy}>
@@ -513,8 +513,8 @@ export default function PoolPage({ params }: { params: Promise<{ id: string }> }
       hint =
         kicks > 0
           ? owedTurn
-            ? "Their 48-hour grace is over: this removes them. The draw still waits for them to rejoin and pay."
-            : "Their 48-hour grace is over: this removes them. The draw waits for them to rejoin and pay."
+            ? "Their 48-hour grace is over: this removes them, and the draw goes on without them. They lose their turn unless they rejoin."
+            : "Their 48-hour grace is over: this removes them, and the draw goes on without them."
           : f.stakePool
             ? "Slashes their stake and starts a 48-hour grace. The draw waits until they pay."
             : "Starts their 48-hour grace. The draw waits until they pay.";
@@ -536,13 +536,14 @@ export default function PoolPage({ params }: { params: Promise<{ id: string }> }
         </button>
       );
       if (f.drawDue && drawnRound !== pool.currentRound) {
-        hint = f.markLeavesNoWinner
-          ? `Waiting for ${plural(f.toMark.length, "seat", "seats")} to pay: ${f.toMark.length === 1 ? "it’s the only one" : "they’re the only ones"} left that can win.`
-          : f.waitingOn.length > 0
-            ? `Waiting for ${plural(f.waitingOn.length, "seat", "seats")} to ${f.waitingOn.some((w) => w.isKicked) ? "pay or rejoin" : "pay"}.`
-            : f.eligible === 0
-              ? "No seat can win this round."
-              : null;
+        hint =
+          f.spared.length > 0
+            ? `Waiting for ${plural(f.spared.length, "seat", "seats")} to pay: ${f.spared.length === 1 ? "it’s the only one" : "they’re the only ones"} left that can win.`
+            : f.waitingOn.length > 0
+              ? `Waiting for ${plural(f.waitingOn.length, "seat", "seats")} to pay.`
+              : f.eligible === 0
+                ? "No seat can win this round."
+                : null;
       }
       break;
     case "closed":
