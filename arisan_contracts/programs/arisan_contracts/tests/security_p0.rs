@@ -1521,3 +1521,237 @@ async fn cannot_leave_or_refund_stake_after_the_circle_starts() {
     );
 }
 
+/// Paid seats take the pot. A missed seat cannot win. The draw waits through
+/// grace; after kick the pot is contribution × remaining members.
+#[tokio::test]
+async fn paid_take_the_pot_missed_cannot_win() {
+    let member2 = Keypair::new();
+    let member3 = Keypair::new();
+    let mut test = program_test();
+    for member in [&member2, &member3] {
+        test.add_account(
+            member.pubkey(),
+            Account::new(2_000_000_000, 0, &system_program::id()),
+        );
+    }
+    let mut context = test.start_with_context().await;
+    let payer = context.payer.insecure_clone();
+    let fixture = create_pool(&mut context, 3, true).await;
+    let roster = [payer.pubkey(), member2.pubkey(), member3.pubkey()];
+    for member in [&payer, &member2, &member3] {
+        join(&mut context, &fixture, member).await;
+        deposit_stake(&mut context, &fixture, member).await;
+    }
+    start_pool(&mut context, &fixture, &roster).await;
+    pay(&mut context, &fixture, &payer, 1).await;
+    pay(&mut context, &fixture, &member2, 1).await;
+
+    let member_pdas: Vec<Pubkey> = roster
+        .iter()
+        .map(|w| pda(&[b"member", fixture.pool.as_ref(), w.as_ref()]))
+        .collect();
+    let payments = payment_pdas(&fixture, &roster, 1);
+
+    let pool = load_pool(&account_data(&mut context, fixture.pool).await);
+    set_time(&mut context, pool.next_draw_timestamp + 5).await;
+    assert_ok(
+        &send(
+            &mut context,
+            &[mark_ix(&fixture, payer.pubkey(), member3.pubkey(), 1)],
+            &[],
+        )
+        .await,
+        "mark missed after due",
+    );
+
+    let committed_slot = commit(&mut context, &fixture).await;
+    context.warp_to_slot(committed_slot + 3).unwrap();
+    let hash = read_slot_hash(
+        &account_data(&mut context, slot_hashes::id()).await,
+        committed_slot,
+    )
+    .unwrap();
+    let mut paid = [payer.pubkey(), member2.pubkey()];
+    let winner = select_winner(&hash, &mut paid).unwrap();
+
+    assert_logs_contain(
+        &send(
+            &mut context,
+            &[execute_ix(
+                &fixture,
+                payer.pubkey(),
+                winner,
+                1,
+                &member_pdas,
+                &payments,
+            )],
+            &[],
+        )
+        .await,
+        "All members must pay the current round",
+    );
+
+    let grace = load_member(&account_data(&mut context, member_pdas[2]).await).grace_deadline;
+    set_time(&mut context, grace + 5).await;
+    assert_ok(
+        &send(
+            &mut context,
+            &[mark_ix(&fixture, payer.pubkey(), member3.pubkey(), 1)],
+            &[],
+        )
+        .await,
+        "kick missed",
+    );
+
+    assert_logs_contain(
+        &send(
+            &mut context,
+            &[execute_ix(
+                &fixture,
+                payer.pubkey(),
+                member3.pubkey(),
+                1,
+                &member_pdas,
+                &payments,
+            )],
+            &[],
+        )
+        .await,
+        "Winner is not the member derived from on-chain randomness",
+    );
+
+    let vault_before = lamports(&mut context, fixture.vault).await;
+    let winner_before = lamports(&mut context, winner).await;
+    assert_ok(
+        &send(
+            &mut context,
+            &[execute_ix(
+                &fixture,
+                payer.pubkey(),
+                winner,
+                1,
+                &member_pdas,
+                &payments,
+            )],
+            &[],
+        )
+        .await,
+        "paid take the pot",
+    );
+    assert_eq!(
+        vault_before - lamports(&mut context, fixture.vault).await,
+        CONTRIB * 2
+    );
+    if winner != payer.pubkey() {
+        assert_eq!(
+            lamports(&mut context, winner).await - winner_before,
+            CONTRIB * 2
+        );
+    }
+    assert!(
+        load_member(&account_data(&mut context, member_pdas[2]).await).is_kicked
+    );
+    assert!(
+        !load_member(&account_data(&mut context, member_pdas[2]).await).has_won
+    );
+}
+
+/// A missed seat can recover in grace: restake, pay, then they stay in the draw.
+#[tokio::test]
+async fn missed_recovers_in_grace_by_restake_and_pay() {
+    let member2 = Keypair::new();
+    let mut test = program_test();
+    test.add_account(
+        member2.pubkey(),
+        Account::new(3_000_000_000, 0, &system_program::id()),
+    );
+    let mut context = test.start_with_context().await;
+    let payer = context.payer.insecure_clone();
+    let fixture = create_pool(&mut context, 2, true).await;
+    let roster = [payer.pubkey(), member2.pubkey()];
+    for member in [&payer, &member2] {
+        join(&mut context, &fixture, member).await;
+        deposit_stake(&mut context, &fixture, member).await;
+    }
+    start_pool(&mut context, &fixture, &roster).await;
+    pay(&mut context, &fixture, &payer, 1).await;
+
+    let pool = load_pool(&account_data(&mut context, fixture.pool).await);
+    set_time(&mut context, pool.next_draw_timestamp + 5).await;
+    assert_ok(
+        &send(
+            &mut context,
+            &[mark_ix(&fixture, payer.pubkey(), member2.pubkey(), 1)],
+            &[],
+        )
+        .await,
+        "mark missed",
+    );
+    let missed = load_member(
+        &account_data(
+            &mut context,
+            pda(&[b"member", fixture.pool.as_ref(), member2.pubkey().as_ref()]),
+        )
+        .await,
+    );
+    assert!(missed.in_grace_period);
+    assert!(missed.in_default);
+    assert!(!missed.stake_deposited);
+
+    deposit_stake(&mut context, &fixture, &member2).await;
+    pay(&mut context, &fixture, &member2, 1).await;
+    let recovered = load_member(
+        &account_data(
+            &mut context,
+            pda(&[b"member", fixture.pool.as_ref(), member2.pubkey().as_ref()]),
+        )
+        .await,
+    );
+    assert!(!recovered.in_grace_period);
+    assert!(!recovered.in_default);
+    assert!(recovered.stake_deposited);
+
+    let clock: Clock = context.banks_client.get_sysvar().await.unwrap();
+    context.warp_to_slot(clock.slot + 5).unwrap();
+    let committed_slot = commit(&mut context, &fixture).await;
+    context.warp_to_slot(committed_slot + 3).unwrap();
+    let hash = read_slot_hash(
+        &account_data(&mut context, slot_hashes::id()).await,
+        committed_slot,
+    )
+    .unwrap();
+    let mut eligible = [payer.pubkey(), member2.pubkey()];
+    let winner = select_winner(&hash, &mut eligible).unwrap();
+    let member_pdas = [
+        pda(&[b"member", fixture.pool.as_ref(), payer.pubkey().as_ref()]),
+        pda(&[b"member", fixture.pool.as_ref(), member2.pubkey().as_ref()]),
+    ];
+    assert_ok(
+        &send(
+            &mut context,
+            &[execute_ix(
+                &fixture,
+                payer.pubkey(),
+                winner,
+                1,
+                &member_pdas,
+                &payment_pdas(&fixture, &roster, 1),
+            )],
+            &[],
+        )
+        .await,
+        "draw after recovery",
+    );
+    assert_eq!(
+        load_draw(
+            &account_data(
+                &mut context,
+                pda(&[b"draw", fixture.pool.as_ref(), &[1]]),
+            )
+            .await,
+        )
+        .amount,
+        CONTRIB * 2
+    );
+}
+
