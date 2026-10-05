@@ -86,7 +86,9 @@ export function AppShell({ title, back, children }: AppShellProps) {
       </header>
 
       <WalletModalA11y />
-      <main className="flex-1 overflow-x-clip px-4 pb-[calc(7rem+env(safe-area-inset-bottom))] pt-1">{children}</main>
+      <main className={cn("flex-1 overflow-x-clip px-4 pb-[calc(7rem+env(safe-area-inset-bottom))] pt-1", !introDone && "invisible")} aria-hidden={!introDone}>
+        {children}
+      </main>
 
       {/* A floating dock: Home and Join either side, Create as the gold coin in the middle */}
       <nav
