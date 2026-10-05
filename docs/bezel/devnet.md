@@ -67,3 +67,9 @@ CHAIN_RPC=http://127.0.0.1:18899 PW_NO_SERVER=1 E2E_PORT=3121 npx playwright tes
 ```
 
 Two browsers with wallets that sign for real run a whole two-seat circle: about 13 minutes when rounds were 5 minutes on-chain; since `948fa41` they're 1 minute.
+
+The same with twenty wallets, five acting at a time: a twenty-seat circle from create to every stake back, then checked on-chain (twenty different winners, each paid the whole pot, the vault empty). About 45 minutes:
+
+```sh
+CHAIN_RPC=http://127.0.0.1:18899 CHAIN_SEATS=20 PW_NO_SERVER=1 E2E_PORT=3121 npx playwright test e2e/chain-twenty.spec.ts
+```

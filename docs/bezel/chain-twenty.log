@@ -1,0 +1,32 @@
+
+Running 1 test using 1 worker
+
+   17s  created 3K9mkJqgMdr9oXcQYtiCFnrqcSv9gwHZdGdKc78Q4Djr
+   79s  20 seats taken and staked
+  226s  round 1 paid by all 20 (76s) and drawn
+  349s  round 2 paid by all 20 (78s) and drawn
+  487s  round 3 paid by all 20 (71s) and drawn
+  623s  round 4 paid by all 20 (91s) and drawn
+  761s  round 5 paid by all 20 (71s) and drawn
+  895s  round 6 paid by all 20 (68s) and drawn
+ 1020s  round 7 paid by all 20 (79s) and drawn
+ 1162s  round 8 paid by all 20 (75s) and drawn
+ 1287s  round 9 paid by all 20 (80s) and drawn
+ 1417s  round 10 paid by all 20 (84s) and drawn
+ 1554s  round 11 paid by all 20 (68s) and drawn
+ 1696s  round 12 paid by all 20 (76s) and drawn
+ 1823s  round 13 paid by all 20 (81s) and drawn
+ 1960s  round 14 paid by all 20 (71s) and drawn
+ 2084s  round 15 paid by all 20 (78s) and drawn
+ 2209s  round 16 paid by all 20 (79s) and drawn
+ 2339s  round 17 paid by all 20 (85s) and drawn
+ 2478s  round 18 paid by all 20 (73s) and drawn
+ 2617s  round 19 paid by all 20 (74s) and drawn
+ 2762s  round 20 paid by all 20 (76s) and drawn
+ 2773s  20 winners, 20 pots of 0.2 SOL, vault empty, every stake back
+  ok 1 [mobile-390] › e2e\chain-twenty.spec.ts:36:5 › a 20-seat circle runs end to end through the UI on a real chain (46.2m)
+
+  Slow test file: [mobile-390] › e2e\chain-twenty.spec.ts (46.2m)
+  Consider running tests from slow files in parallel. See: https://playwright.dev/docs/test-parallel
+  1 passed (46.4m)
+exit 0
