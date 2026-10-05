@@ -1,24 +1,12 @@
-# Devnet: the deployed program is older than this repo
+# Devnet: the app's program
 
 Checked 2026-10-05 against `https://api.devnet.solana.com`.
 
 ## What's on devnet
 
-- Program `BjxGBSpEULzq9kJfx3bGB1rpVHwta8QuP2jeVKow3wN6` was last deployed **2025-12-12** (slot 427,830,596).
-- Upgrade authority: `CaJpp31WNCQAZPt11BY13Eqyu1vxPnnJYHDyhXmWwud6`.
-- The program fixes from 2026-09-28 were never deployed: `aca7d1f` (bound draw: `commit_draw_randomness` + slot-hash winner), `f77e322` (invite code as return data), `1dcca50` (only start full pools). Nor were the later ones: PR #23 (the draw needs every seat paid; start needs the full staked roster) and its follow-up in `execute_draw` (removed seats don't hold the draw; a circle completes once no one left can win).
-
-## What that breaks (live site and `main` alike)
-
-Both point at that address and expect the repo's program (the live bundle contains `commit_draw_randomness`, `member_wallets` and the return-data read):
-
-| Step | On devnet today |
-|---|---|
-| Create a circle | The transaction lands, but the invite code is only in the program log (`Invite code: …`), not in return data, so the app shows "Couldn't read the invite code". |
-| Open a circle | New pools are 187 bytes; the repo's IDL expects the roster and draw fields, so decoding fails and the app shows "Circle not found". |
-| Draw | `commit_draw_randomness` doesn't exist in the deployed program. |
-
-Nothing in the client can fix this. The program has to be upgraded.
+- Since `698cbc3` (5 Oct) the app points at `Aw54KXqUyccCACmmry5MmCmTzqJqKfmnL868aMpJaGbB`, which Hamza deployed from `main` at `fc0abe4` (PR #23 included), slot 507,819,846. Upgrade authority `AMrVdasczrafDFiF3YgYNtNeEw6vvURzrK1AipP3bPnW`; the program data holds 479,624 bytes.
+- Not on it yet: the `execute_draw` follow-up (`44ca78d`: removed seats don't hold the draw, and a circle completes once no one left can win). The app on `main` already follows that rule, so upgrade the program before, or with, the next site deploy (see Upgrade). With the app ahead of the program, a circle with a removed seat would commit a draw the program then refuses, and an unfinished commit locks the circle. A removal needs a 48-hour grace first.
+- The previous program, `BjxGBSpEULzq9kJfx3bGB1rpVHwta8QuP2jeVKow3wN6` (last deployed 2025-12-12, authority `CaJpp31WNCQAZPt11BY13Eqyu1vxPnnJYHDyhXmWwud6`), stays on chain and the app no longer uses it. It predated the 2026-09-28 fixes (`aca7d1f` bound draw, `f77e322` invite code as return data, `1dcca50` only start full pools): against it the app could create a circle but not read it back, show its invite code or draw.
 
 ## The repo's program, run locally
 
@@ -48,19 +36,16 @@ docker run --rm -v "$PWD/arisan_contracts:/src:ro" -v "$PWD/out:/out" backpackap
 
 Result: `arisan_contracts.so`, 477,496 bytes (`main` with PR #23 and the follow-up; 462,056 before them). The same image runs the program tests with stable Rust (`rustup toolchain install stable`, then `RUST_LOG=off cargo +stable test -p arisan_contracts --test security_p0 -- --test-threads=1`): 10 passed, 1 ignored (P-2).
 
-## Deploy (needs the upgrade authority's key)
+## Upgrade (needs the upgrade authority's key)
 
-The new binary is bigger than the program account: the current program data holds 416,448 bytes, the new one needs 477,496. Extend first, then deploy:
+Build from `main` (the program ID comes from `declare_id!`, so build after `698cbc3`). The follow-up build is 477,496 bytes, under the 479,624 the program data holds, so no extend is needed:
 
 ```sh
 solana config set -u devnet -k <upgrade-authority keypair>
-solana program extend BjxGBSpEULzq9kJfx3bGB1rpVHwta8QuP2jeVKow3wN6 65000
-solana program deploy --program-id BjxGBSpEULzq9kJfx3bGB1rpVHwta8QuP2jeVKow3wN6 out/arisan_contracts.so
+solana program deploy --program-id Aw54KXqUyccCACmmry5MmCmTzqJqKfmnL868aMpJaGbB out/arisan_contracts.so
 ```
 
-Budget about 4 devnet SOL in that wallet: the extension's rent (about 0.45 SOL) and a temporary write buffer (about 3.3 SOL, returned when the deploy finishes).
-
-After the upgrade, pools created by the old program (187-byte accounts) can't be used by the new program or the app; the app skips them as old format. They only hold devnet SOL.
+Budget about 3.5 devnet SOL in that wallet for the temporary write buffer (returned when the deploy finishes). No account layout changes, so circles made before the upgrade keep working.
 
 ## Check it afterwards
 
@@ -75,7 +60,7 @@ It prints the deploy slot and authority, whether the binary has `commit_draw_ran
 ```sh
 docker run -d --name arisan-validator -p 127.0.0.1:18899:8899 -p 127.0.0.1:18900:8900 -v "$PWD/out:/prog:ro" \
   backpackapp/build:v0.30.1 bash -lc "solana-test-validator --reset --ledger /tmp/ledger --bind-address 0.0.0.0 \
-  --bpf-program BjxGBSpEULzq9kJfx3bGB1rpVHwta8QuP2jeVKow3wN6 /prog/arisan_contracts.so --quiet"
+  --bpf-program Aw54KXqUyccCACmmry5MmCmTzqJqKfmnL868aMpJaGbB /prog/arisan_contracts.so --quiet"
 NEXT_PUBLIC_SOLANA_RPC_URL=http://127.0.0.1:18899 npx next build && npx next start -p 3121
 CHAIN_RPC=http://127.0.0.1:18899 PW_NO_SERVER=1 E2E_PORT=3121 npx playwright test e2e/chain.spec.ts
 ```
