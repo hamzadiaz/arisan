@@ -64,17 +64,18 @@ export function BezelDefs() {
           <stop offset=".7" stopColor="#9e7426" />
           <stop offset="1" stopColor="#f0d38a" />
         </linearGradient>
+        {/* Deep emerald glass in dark, mint in light: the same as the 3D dial */}
         <linearGradient id="bz-glass" x1="0" y1="0" x2="1" y2="1">
-          <stop offset="0" stopColor="#9df7d2" />
-          <stop offset=".28" stopColor="#2fc18b" />
-          <stop offset=".62" stopColor="#127a55" />
-          <stop offset="1" stopColor="#0b4a34" />
+          <stop offset="0" stopColor="#6fe0b8" />
+          <stop offset=".28" stopColor="#179a6d" />
+          <stop offset=".62" stopColor="#0d6248" />
+          <stop offset="1" stopColor="#073a2a" />
         </linearGradient>
         <linearGradient id="bz-glass-light" x1="0" y1="0" x2="1" y2="1">
-          <stop offset="0" stopColor="#bff8e0" />
-          <stop offset=".3" stopColor="#3fcf98" />
-          <stop offset=".65" stopColor="#169064" />
-          <stop offset="1" stopColor="#0e5a3f" />
+          <stop offset="0" stopColor="#e6fbf1" />
+          <stop offset=".3" stopColor="#b8efd7" />
+          <stop offset=".65" stopColor="#8fdcbc" />
+          <stop offset="1" stopColor="#5fc39c" />
         </linearGradient>
         <radialGradient id="bz-band" gradientUnits="userSpaceOnUse" cx="64" cy="64" r="62">
           <stop offset=".7" stopColor="#05301f" />

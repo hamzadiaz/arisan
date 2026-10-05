@@ -12,7 +12,7 @@
 | 05 | Join: eight-box code, circle found |
 
 The dial is Three.js. Pages load with `?dial=3d` so the proof shows it on any machine; without
-the flag, software WebGL (CI) falls back to the SVG dial, which is the same design drawn flat.
+the flag, software WebGL (CI) keeps the SVG dial: the same glass colours and seat marks, drawn flat.
 
 Regenerate:
 

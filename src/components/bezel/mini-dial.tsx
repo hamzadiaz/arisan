@@ -42,8 +42,8 @@ export function MiniDial({ spec, className }: { spec: DialSpec; className?: stri
             {st === "taken" && <circle cx={x} cy={y} r={r * 0.9} fill="none" style={{ stroke: "var(--dial-mark-taken)" }} strokeWidth=".8" />}
             {st === "lit" && (
               <>
-                <circle cx={x} cy={y} r={r + 1.4} fill="#5cf2b6" opacity={0.3} />
-                <circle cx={x} cy={y} r={r} fill="#5cf2b6" />
+                <circle cx={x} cy={y} r={r + 1.4} style={{ fill: "var(--dial-lit)" }} opacity={0.3} />
+                <circle cx={x} cy={y} r={r} style={{ fill: "var(--dial-lit)" }} />
               </>
             )}
             {st === "won" && (

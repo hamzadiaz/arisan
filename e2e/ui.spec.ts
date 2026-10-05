@@ -179,6 +179,14 @@ test.describe("5. Join", () => {
   });
 });
 
+test("5b. a shared invite link fills the code and finds the circle", async ({ page }) => {
+  await mockRpcWithPool(page);
+  await gotoReady(page, `/join?code=${MOCK_POOL.inviteCode.toLowerCase()}`);
+  await expect(page.getByPlaceholder("ABCD1234")).toHaveValue(MOCK_POOL.inviteCode);
+  await expect(page.getByRole("heading", { name: MOCK_POOL.name })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Connect wallet to join" })).toBeEnabled();
+});
+
 test.describe("6. Create", () => {
   test("name, amount, members, stake None/1x/2x/3x, and Connect wallet to create", async ({ page }) => {
     await gotoReady(page, "/pools/create");

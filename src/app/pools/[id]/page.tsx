@@ -391,7 +391,9 @@ export default function PoolPage({ params }: { params: Promise<{ id: string }> }
         ? `${plural(pool.maxMembers - f.joined, "seat", "seats")} still open.`
         : f.staked < f.joined
           ? `${plural(f.joined - f.staked, "seat still needs", "seats still need")} to stake.`
-          : "Everyone has staked.";
+          : f.stakePool
+            ? "Everyone has staked."
+            : "Everyone’s in.";
       break;
     case "waiting":
       primary = (
@@ -533,9 +535,11 @@ export default function PoolPage({ params }: { params: Promise<{ id: string }> }
         hint =
           f.waitingOn.length > 0
             ? `Waiting for ${plural(f.waitingOn.length, "seat", "seats")} in grace to pay.`
-            : f.eligible === 0
-              ? "No seat can win this round."
-              : null;
+            : f.markLeavesNoWinner
+              ? `Waiting for ${plural(f.toMark.length, "seat", "seats")} to pay: ${f.toMark.length === 1 ? "it’s the only one" : "they’re the only ones"} left that can win.`
+              : f.eligible === 0
+                ? "No seat can win this round."
+                : null;
       }
       break;
     case "closed":

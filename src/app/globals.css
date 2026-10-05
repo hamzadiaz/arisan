@@ -80,9 +80,11 @@
   --sheet: #ffffff;
   --dial-glow: rgba(184, 146, 42, 0.14);
   --dial-mark-off: #d6ddd9;
-  --dial-mark-open: rgba(18, 24, 21, 0.4);
-  --dial-mark-taken: #5b6660;
-  --dial-case: #0c3b2b;
+  --dial-mark-open: rgba(111, 138, 126, 0.6);
+  --dial-mark-taken: #4f6b60;
+  --dial-lit: #0e8a5f;
+  /* The empty dial shows the page through it */
+  --dial-case: var(--background);
   --dial-glass: url(#bz-glass-light);
 }
 
@@ -123,8 +125,9 @@
   --dial-glow: rgba(212, 175, 55, 0.12);
   --dial-mark-off: #22302a;
   --dial-mark-open: rgba(231, 239, 228, 0.45);
-  --dial-mark-taken: #7b8a83;
-  --dial-case: #0d1512;
+  --dial-mark-taken: #9fb2a9;
+  --dial-lit: #5cf2b6;
+  --dial-case: var(--background);
   --dial-glass: url(#bz-glass);
 }
 
@@ -133,6 +136,15 @@
     @apply border-border;
     /* Every focus ring, not just the kit's: 6:1 on the light page, 13:1 on the dark one */
     outline-color: var(--focus);
+  }
+
+  html {
+    scroll-padding-top: calc(62px + env(safe-area-inset-top));
+    scroll-padding-bottom: calc(80px + env(safe-area-inset-bottom));
+  }
+
+  html:has(.bz-sticky-cta) {
+    scroll-padding-bottom: calc(160px + env(safe-area-inset-bottom));
   }
 
   body {
@@ -725,6 +737,15 @@
     pointer-events: none;
   }
 
+  [data-dial] > canvas {
+    opacity: 0;
+    transition: opacity 0.25s ease-out;
+  }
+
+  [data-dial="webgl"] > canvas {
+    opacity: 1;
+  }
+
   .dial-numeral {
     position: absolute;
     z-index: 1;
@@ -1014,7 +1035,9 @@
   border-radius: 8px;
 }
 
-.wallet-adapter-modal-button-close:focus-visible {
+.wallet-adapter-modal-button-close:focus-visible,
+.wallet-adapter-modal-list .wallet-adapter-button:focus-visible,
+.wallet-adapter-modal-list-more:focus-visible {
   outline: 2px solid var(--focus);
   outline-offset: 2px;
 }

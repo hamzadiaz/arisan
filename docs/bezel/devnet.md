@@ -30,7 +30,7 @@ The repo's program, built from `arisan_contracts/` and loaded into `solana-test-
 - auto circles: the join takes the stake, leaving refunds it, the circle starts when full, and the scheduler marks an unpaid seat before it draws;
 - the redesigned UI end to end, with two wallets that really sign (`e2e/chain.spec.ts`).
 
-Logs: `docs/bezel/onchain.log` (21 of 21 steps) and `docs/bezel/chain-ui.log`.
+Logs: `docs/bezel/onchain.log` (25 of 25 steps, three circles) and `docs/bezel/chain-ui.log`.
 
 ## Build (verified)
 

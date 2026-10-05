@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { ThemeToggle } from "@/components/layout/theme-toggle";
 import { WalletChip } from "@/components/mobile/wallet-button";
+import { WalletModalA11y } from "@/components/mobile/wallet-modal-a11y";
 import { Icon, type IconName } from "@/components/bezel/icons";
 import { cn } from "@/lib/utils";
 
@@ -74,6 +75,7 @@ export function AppShell({ title, back, children }: AppShellProps) {
         </div>
       </header>
 
+      <WalletModalA11y />
       <main className="flex-1 overflow-x-clip px-4 pb-[calc(6rem+env(safe-area-inset-bottom))] pt-1">{children}</main>
 
       <nav className="fixed inset-x-0 bottom-0 z-40 mx-auto w-full max-w-[480px] bg-background pb-[env(safe-area-inset-bottom)] shadow-[inset_0_1px_0_var(--border)]">

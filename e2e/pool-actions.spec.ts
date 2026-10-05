@@ -273,6 +273,24 @@ test.describe("Draw, missed payments and refunds", () => {
     await expect(main(page).getByRole("button", { name: "Finish the draw" })).toHaveCount(0);
   });
 
+  test("the last seat that can win isn't marked: the round waits for it to pay", async ({ page }) => {
+    await openPool(page, {
+      ...due([{ wallet: me, stakeDeposited: true, hasWon: true }, staked(other)], [me]),
+      currentRound: 2,
+    });
+    await expect(main(page).getByRole("button", { name: /^Mark|^Remove/ })).toHaveCount(0);
+    await expect(main(page).getByText("Waiting for 1 seat to pay: it’s the only one left that can win.")).toBeVisible();
+  });
+
+  test("the host finishes a draw started early before anything else", async ({ page }) => {
+    await openPool(page, {
+      ...due([staked(me), staked(other)], [other], { committedSlot: 900, slot: 1000, nextDrawIn: 600 }),
+      authority: me,
+    });
+    await expect(main(page).getByRole("button", { name: /^Pay / })).toHaveCount(0);
+    await expectSigned(page, "Finish the draw", /^execute_?[dD]raw$/);
+  });
+
   test("a finished circle gives the stake back", async ({ page }) => {
     await openPool(page, { status: "Completed", members: [staked(me), staked(other)] });
     await expectSigned(page, "Get 0.5 SOL back", /^claim_?[sS]take_?[rR]efund$/);

@@ -18,6 +18,7 @@ import { formatAmount } from "@/lib/format";
 import { poolToasts, txErrorToast, dismissToast } from "@/lib/solana/transaction-toast";
 
 const CODE_LENGTH = 8;
+const normalizeCode = (raw: string) => raw.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, CODE_LENGTH);
 // Joining pays rent for the member account (about 0.002 SOL) plus the fee.
 const JOIN_COST = 0.005;
 
@@ -44,13 +45,37 @@ export default function JoinPage() {
     };
   }, []);
 
+  // A shared invite link (/join?code=…) fills the boxes and looks the circle up, once.
+  // Read from the URL itself: useSearchParams would need a Suspense boundary on a static page.
+  const linkedOnce = useRef(false);
+  useEffect(() => {
+    if (linkedOnce.current) return;
+    linkedOnce.current = true;
+    const linked = normalizeCode(new URLSearchParams(window.location.search).get("code") ?? "");
+    if (linked.length !== CODE_LENGTH) return;
+    setCode(linked);
+    setSearching(true);
+    getPoolByInviteCode(linked)
+      .then(
+        (found) => {
+          setPool(found);
+          setNotFound(!found);
+        },
+        (error) => {
+          console.error("Invite lookup failed:", error);
+          setLookupFailed(true);
+        }
+      )
+      .finally(() => setSearching(false));
+  }, [getPoolByInviteCode]);
+
   // Move focus to the result so screen readers hear it; the Find button unmounts.
   useEffect(() => {
     if (pool) card.current?.focus();
   }, [pool]);
 
   const updateCode = (raw: string) => {
-    setCode(raw.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, CODE_LENGTH));
+    setCode(normalizeCode(raw));
     setPool(null);
     setNotFound(false);
     setLookupFailed(false);

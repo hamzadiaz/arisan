@@ -114,7 +114,7 @@ function studioEnv(renderer: WebGLRenderer, light: boolean) {
   panel(9, 3.5, 0xfff3dc, light ? 5 : 9, [0, 5.5, -6.5]);
   panel(1.4, 8, 0xfff0da, light ? 5 : 8, [-7, 2.5, 2.5]);
   panel(1.1, 8, 0xe2f1ff, light ? 3 : 5, [7, 2, -2]);
-  panel(6, 1.6, 0x17a37a, light ? 0.6 : 0.7, [0, -1.2, -7]);
+  panel(6, 1.6, 0x0e8c70, 0.35, [0, -1.2, -7]);
   panel(4, 3, 0xffe7c8, light ? 1.6 : 2.6, [2.5, 3, 7]);
   const pm = new PMREMGenerator(renderer);
   const tex = pm.fromScene(scene, 0.03).texture;
@@ -406,14 +406,14 @@ class DialEngine {
       roughness: 0.035,
       metalness: 0,
       transmission: 1,
-      thickness: 0.6,
+      thickness: 0.45,
       ior: 1.56,
-      attenuationColor: new Color("#1fae7c"),
-      attenuationDistance: 0.8,
+      attenuationColor: new Color("#12a08e"),
+      attenuationDistance: 1.0,
       specularIntensity: 1,
       envMapIntensity: 0.9,
-      // A little fire at the edges; more splits the rim into lime
-      dispersion: 0.04,
+      // A trace of fire at the edges; more splits the rim into lime
+      dispersion: 0.015,
     });
     const back = new MeshStandardMaterial({ color: "#0c1613", roughness: 0.35, metalness: 0.3 });
     const backMesh = new Mesh(new CylinderGeometry(1.32, 1.32, 0.03, 160), back);
@@ -464,9 +464,8 @@ class DialEngine {
     };
     const flat = (color: Color, opacity = 1) => new MeshBasicMaterial({ color, toneMapped: false, transparent: true, opacity });
     this.mats = {
-      taken: flat(new Color("#7b8a83"), 0.95),
-      // A joined, unpaid seat is a dark filled dot inside its ring; open seats stay hollow
-      takenFill: flat(new Color("#0f1714"), 0.95),
+      // Filled means paid, as everywhere else in the app: a joined, unpaid seat is a hollow ring
+      taken: flat(new Color("#9fb2a9"), 0.95),
       lit: flat(LUME),
       won: goldMat({ color: MARK_GOLD, rough: 0.18, transparent: true }),
       late: flat(SIGNAL),
@@ -617,18 +616,20 @@ class DialEngine {
     }
     this.scene.environment = env;
     this.themed.back.color.set(light ? "#dfe8e2" : "#0c1613");
-    this.themed.glass.attenuationColor.set(light ? "#3fcf98" : "#1fae7c");
-    this.themed.glass.attenuationDistance = light ? 2.6 : 0.8;
+    this.themed.glass.attenuationColor.set(light ? "#45cfa6" : "#12a08e");
+    this.themed.glass.attenuationDistance = light ? 2.6 : 1.0;
     this.themed.shadow.opacity = light ? 0.32 : 0.7;
     for (const m of this.themed.gold) m.color.set(light ? "#d6c084" : "#d9bc76");
     this.themed.relief.color.set(light ? "#b98d33" : "#d9bc76");
     this.caseEmpty.color.set(light ? "#f3f1ea" : "#0a0f0d");
-    (this.mats.taken as MeshBasicMaterial).color.set(light ? "#0a2a1e" : "#7b8a83");
-    (this.mats.takenFill as MeshBasicMaterial).color.set(light ? "#0a2a1e" : "#0f1714");
+    // On mint glass: due seats a dark ring, paid seats a solid emerald dome, open seats faint
+    (this.mats.taken as MeshBasicMaterial).color.set(light ? "#4f6b60" : "#9fb2a9");
+    (this.mats.lit as MeshBasicMaterial).color.set(light ? "#0e8a5f" : LUME);
     const open = this.mats.open as MeshBasicMaterial;
-    open.color.set(light ? "#f4f2ec" : "#a8b6af");
-    open.opacity = light ? 0.9 : 0.75;
-    (this.mats.glow as SpriteMaterial).opacity = light ? 0.35 : 0.7;
+    open.color.set(light ? "#6f8a7e" : "#a8b6af");
+    open.opacity = light ? 0.6 : 0.45;
+    // Additive glow vanishes on a light page; the dome carries it there
+    (this.mats.glow as SpriteMaterial).opacity = light ? 0 : 0.7;
     (this.mats.glowLate as SpriteMaterial).opacity = light ? 0.3 : 0.6;
   }
 
@@ -744,11 +745,7 @@ class DialEngine {
       g.position.set(R * Math.cos(a), 0.192, R * Math.sin(a));
       const st = markState(s, i);
       if (st === "open") g.add(new Mesh(this.geo.open, this.mats.open));
-      else if (st === "taken") {
-        const fill = new Mesh(this.geo.dome, this.mats.takenFill);
-        fill.scale.set(0.82, 0.3, 0.82);
-        g.add(fill, new Mesh(this.geo.ring, this.mats.taken));
-      }
+      else if (st === "taken") g.add(new Mesh(this.geo.ring, this.mats.taken));
       else if (st === "late") {
         g.add(new Mesh(this.geo.lateRing, this.mats.late));
         const glow = new Sprite(this.mats.glowLate as SpriteMaterial);

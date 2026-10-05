@@ -57,6 +57,8 @@ export interface SchedulerPool {
   memberCount: number;
   contributionAmount: number;
   autoMode: boolean;
+  /** A draw was started for this round and not finished: it locks the circle in 512 slots */
+  committed: boolean;
 }
 
 export interface EligibleMember {
@@ -79,6 +81,11 @@ export interface DrawResult {
 
 /** mark_defaulter instructions per transaction */
 const MARK_BATCH = 8;
+/** SlotHashes keeps 512 slots: a commit older than that can never be finished */
+const SLOT_HASH_WINDOW = 512;
+/** A commit costs a fee; its finish pays the Draw account's rent, maybe a vault top-up and fees */
+const MIN_BALANCE_TO_COMMIT = 0.005 * 1e9;
+const MIN_BALANCE_TO_FINISH = 0.003 * 1e9;
 /** Lamports a data-less account needs to stay open; a vault left with less fails the payout. */
 const RENT_EXEMPT_EMPTY = 890_880;
 /** execute_draw loads and checks every roster member; 20 seats can pass the 200k default. */
@@ -142,6 +149,7 @@ const MIN_POOL_SIZE = 163;
  */
 export async function getPoolsReadyForDraw(program: Program): Promise<SchedulerPool[]> {
   const now = Math.floor(Date.now() / 1000);
+  const poolName = program.idl.accounts?.find((a) => a.name.toLowerCase() === "pool")?.name ?? "pool";
   const readyPools: SchedulerPool[] = [];
   const connection = program.provider.connection;
 
@@ -169,21 +177,18 @@ export async function getPoolsReadyForDraw(program: Program): Promise<SchedulerP
           continue;
         }
 
-        // Decode the pool using Anchor's coder
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const coder = (program as any).coder;
-        const pool = coder.accounts.decode("pool", account.data) as unknown as OnChainPool;
+        // The account name as the program's (camel-cased) IDL spells it
+        const pool = program.coder.accounts.decode(poolName, account.data) as unknown as OnChainPool;
         const status = getPoolStatusString(pool.status);
 
         console.log(`Pool ${pubkey.toBase58().slice(0, 8)}... - status: ${status}, autoMode: ${pool.autoMode}, nextDraw: ${pool.nextDrawTimestamp.toNumber()}, now: ${now}`);
 
-        // Check conditions:
-        // 1. Pool is active
-        // 2. Auto mode is enabled
-        // 3. Draw deadline has passed
+        // Active and past its deadline, and either automatic (the cron runs its draws) or any
+        // circle whose draw was started and not finished: nobody else may tap Finish in time.
+        const committed = pool.randomnessRound === pool.currentRound && pool.currentRound > 0;
         if (
           status === "active" &&
-          pool.autoMode &&
+          (pool.autoMode || committed) &&
           pool.nextDrawTimestamp.toNumber() < now
         ) {
           // Decode pool name
@@ -200,6 +205,7 @@ export async function getPoolsReadyForDraw(program: Program): Promise<SchedulerP
             memberCount: pool.memberCount,
             contributionAmount: pool.contributionAmount.toNumber(),
             autoMode: pool.autoMode,
+            committed,
           });
         }
       } catch (poolErr: any) {
@@ -212,7 +218,8 @@ export async function getPoolsReadyForDraw(program: Program): Promise<SchedulerP
   }
 
   console.log(`Found ${readyPools.length} pools ready for draw`);
-  return readyPools;
+  // Started draws first: they lock in 512 slots
+  return readyPools.sort((a, b) => Number(b.committed) - Number(a.committed));
 }
 
 // ============ Member Fetching ============
@@ -330,7 +337,15 @@ export async function executeDraw(
     // stake covers the pot and they can't win it; a seat still in grace from an earlier round
     // holds the draw. The app follows the same rule (round-settlement.ts). A commit already
     // made for this round skips straight to the execute: it expires in 512 slots.
+    // Manual circles are drawn by their members; the cron only finishes a draw someone started
+    if (!poolAccount.autoMode && poolAccount.randomnessRound !== round) {
+      return skip("Manual circle: nothing started to finish");
+    }
+
+    const balance = await connection.getBalance(keypair.publicKey, "confirmed");
     if (poolAccount.randomnessRound !== round) {
+      // Never start a draw it can't afford to finish
+      if (balance < MIN_BALANCE_TO_COMMIT) return skip("Scheduler balance too low to start a draw");
       const nowSec = (await connection.getBlockTime(await connection.getSlot("confirmed"))) ?? Math.floor(Date.now() / 1000);
       const deadlineSec = poolAccount.nextDrawTimestamp.toNumber();
       if (nowSec <= deadlineSec) return skip("Round not due on-chain yet");
@@ -434,13 +449,20 @@ export async function executeDraw(
       }
     }
 
+    if (balance < MIN_BALANCE_TO_FINISH) return skip("Scheduler balance too low to finish a draw");
     const committedSlot = BigInt(poolAccount.randomnessSlot.toString());
+    const expiresAt = committedSlot + BigInt(SLOT_HASH_WINDOW);
     const started = Date.now();
     let hash: Uint8Array | null = null;
     while (Date.now() - started < 30_000) {
-      const info = await connection.getAccountInfo(SLOT_HASHES_SYSVAR);
+      const [info, slot] = await Promise.all([
+        connection.getAccountInfo(SLOT_HASHES_SYSVAR),
+        connection.getSlot("confirmed"),
+      ]);
       hash = info ? readSlotHash(info.data, committedSlot) : null;
       if (hash) break;
+      // An expired commit can never be finished: don't spend the run waiting on it
+      if (BigInt(slot) > expiresAt) return skip("Draw expired before it was finished (circle locked)");
       await new Promise((resolve) => setTimeout(resolve, 500));
     }
     if (!hash) {
@@ -538,8 +560,8 @@ export async function processDraws(): Promise<{
     const balance = await connection.getBalance(keypair.publicKey);
     console.log(`Scheduler balance: ${balance / 1e9} SOL`);
 
-    if (balance < 0.001 * 1e9) {
-      console.warn("Warning: Scheduler wallet balance is low!");
+    if (balance < 0.05 * 1e9) {
+      console.warn("Warning: Scheduler wallet balance is low! Below 0.005 SOL it stops starting draws.");
     }
 
     // Get pools ready for draw

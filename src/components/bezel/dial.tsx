@@ -213,7 +213,7 @@ export function Dial({ spec, size = 280, view = "hero", numerals = false, drawin
       className={cn("dial-glow relative mx-auto aspect-square max-w-full shrink-0", className)}
       style={{ width: size }}
     >
-      <div className={cn("absolute inset-[7%] transition-opacity duration-500", mode === "webgl" && "opacity-0")} aria-hidden="true">
+      <div className={cn("absolute inset-[7%] transition-opacity duration-300", mode === "webgl" && "opacity-0")} aria-hidden="true">
         <MiniDial spec={spec} className="size-full" />
       </div>
       {numerals && shown && (
