@@ -1,0 +1,82 @@
+1
+00:00:00,800 --> 00:00:05,565
+This is Arisan: savings circles on
+your phone, run by a Solana program,
+
+2
+00:00:05,565 --> 00:00:06,437
+not a person.
+
+3
+00:00:07,137 --> 00:00:12,837
+Everyone pays in each round, and each
+round one person takes the whole pot.
+
+4
+00:00:13,537 --> 00:00:17,653
+Ana creates a circle: three
+seats, 0.1 SOL a round,
+
+5
+00:00:17,653 --> 00:00:21,123
+and a small stake she
+gets back at the end.
+
+6
+00:00:21,823 --> 00:00:27,995
+She gets an invite code, takes the first
+seat and stakes from her own wallet.
+
+7
+00:00:28,695 --> 00:00:32,875
+Budi and Citra join with
+the code and stake too.
+
+8
+00:00:32,875 --> 00:00:36,795
+With every seat taken,
+Ana starts the circle.
+
+9
+00:00:37,715 --> 00:00:43,290
+Round one: everyone pays 0.1 SOL
+with one tap, right from Home.
+
+10
+00:00:43,990 --> 00:00:48,530
+When the round ends, anyone
+can run the draw: commit,
+
+11
+00:00:48,530 --> 00:00:53,756
+then draw from a block hash
+nobody knew. This time, Ana wins.
+
+12
+00:00:55,172 --> 00:01:00,150
+The vault pays her on the spot,
+and the history keeps every round.
+
+13
+00:01:00,850 --> 00:01:07,378
+Round two goes to Citra, who ran the
+draw herself. Round three goes to Budi.
+
+14
+00:01:07,378 --> 00:01:09,784
+Each seat wins exactly once.
+
+15
+00:01:12,647 --> 00:01:15,584
+Then everyone takes their stake back.
+
+16
+00:01:15,584 --> 00:01:19,393
+In 0.3 SOL, out 0.3 SOL:
+no lender, no interest.
+
+17
+00:01:20,093 --> 00:01:25,993
+Arisan is live on Solana devnet.
+Try it at arisan-self.vercel.app.
+
