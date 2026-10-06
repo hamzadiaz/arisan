@@ -1,6 +1,7 @@
 # Arisan demo (fast cut): voice-over script
 
-**Video:** `arisan-demo-fast.mp4`, 1920×1080, 30 fps, 1:26.3 long, no captions and no sound.
+**Master:** `arisan-demo.mp4` — same picture, Gemini voice, Lyria score, SFX, burned-in captions.
+**Silent cut:** `arisan-demo-fast.mp4`, 1920×1080, 30 fps, 1:26.3 long, no captions and no sound.
 **Captions:** `arisan-demo-fast.srt` has every line below at its time. Import it as captions, or let your editor caption your own read.
 
 Each line fits its scene at a calm pace (about 2.4 words a second), with room to spare for music. Start each line just after its scene starts. If a line runs long, tell me the scene number and I'll lengthen that shot.
