@@ -1,0 +1,84 @@
+1
+00:00:00,150 --> 00:00:06,784
+Millions of families save in an arisan: everyone pays in each month, and one person takes the whole pot.
+
+2
+00:00:06,784 --> 00:00:10,575
+But someone has to hold the cash, and turns slip.
+
+3
+00:00:10,575 --> 00:00:14,050
+What if a Solana program held the pot instead?
+
+4
+00:00:14,350 --> 00:00:19,850
+This is Arisan, spelled A. R. I. S. A. N.
+
+5
+00:00:20,150 --> 00:00:25,350
+Here it is on a Solana Seeker, installed from our Android APK.
+
+6
+00:00:25,650 --> 00:00:30,600
+It connects through Mobile Wallet Adapter, and Seed Vault approves.
+
+7
+00:00:30,900 --> 00:00:34,392
+Now a whole circle with three wallets.
+
+8
+00:00:34,392 --> 00:00:40,600
+Ana creates it: three seats, zero point one SOL a round, and a zero point one SOL stake.
+
+9
+00:00:40,900 --> 00:00:45,385
+She takes her seat and puts in her stake.
+
+10
+00:00:45,685 --> 00:00:56,635
+Boo-dee and Chitra join with the invite code, and stake from their own wallets.
+
+11
+00:00:56,935 --> 00:01:01,435
+The circle can only start once every seat is taken and staked.
+
+12
+00:01:01,735 --> 00:01:07,835
+Round one: everyone pays zero point one SOL with one tap.
+
+13
+00:01:08,135 --> 00:01:13,435
+Here is a payment from our live dev-net circle, on Solana Explorer.
+
+14
+00:01:13,735 --> 00:01:17,080
+Then anyone can run the draw: commit, then draw.
+
+15
+00:01:17,080 --> 00:01:21,035
+A block hash nobody knew at commit time picks the winner.
+
+16
+00:01:21,335 --> 00:01:28,735
+The vault pays the whole pot in the same transaction.
+
+17
+00:01:29,035 --> 00:01:33,333
+Each seat wins exactly once.
+
+18
+00:01:33,333 --> 00:01:40,701
+Round two goes to Chitra, and round three to Boo-dee.
+
+19
+00:01:41,001 --> 00:01:45,096
+At the end, every stake comes back.
+
+20
+00:01:45,096 --> 00:01:47,826
+No lender, no interest.
+
+21
+00:01:48,476 --> 00:01:54,576
+Arisan. Try it on devnet today: the app and the Android APK are linked on screen.
+

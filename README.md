@@ -11,7 +11,7 @@ An *arisan* is the rotating savings circle that friends, families and coworkers 
 | Try it (devnet) | https://arisan-self.vercel.app |
 | Android APK | https://arisan-self.vercel.app/arisan-clockin.apk |
 | Program (devnet) | [`Aw54KXqUyccCACmmry5MmCmTzqJqKfmnL868aMpJaGbB`](https://explorer.solana.com/address/Aw54KXqUyccCACmmry5MmCmTzqJqKfmnL868aMpJaGbB?cluster=devnet) |
-| Demo video | [`docs/demo-video/arisan-demo.mp4`](docs/demo-video/arisan-demo.mp4) |
+| Demo video | [`docs/demo-video/arisan-demo-phone.mp4`](docs/demo-video/arisan-demo-phone.mp4) |
 
 Tested at 20 seats. Live circle run with 2 wallets.
 
