@@ -1,5 +1,29 @@
-# Anchor security_p0, run 2026-10-05 in backpackapp/build:v0.30.1 with stable Rust:
+# Anchor security_p0, run 2026-10-07 on main at 878dc27, in backpackapp/build:v0.30.1 with rustc 1.99.0 (stable):
 #   RUST_LOG=off cargo +stable test -p arisan_contracts --test security_p0 -- --test-threads=1
+
+running 18 tests
+test cannot_leave_or_refund_stake_after_the_circle_starts ... ok
+test execute_draw_rejects_round_with_an_unpaid_member ... ok
+test execute_draw_succeeds_only_after_every_current_round_payment_exists ... ok
+test five_member_circle_pays_draws_and_refunds_every_seat ... ok
+test full_circle_runs_every_round_then_completes ... ok
+test join_requires_the_hashed_invite_code ... ok
+test kicked_member_holds_neither_the_draw_nor_the_end_of_the_circle ... ok
+test malicious_caller_cannot_choose_winner_and_vault_pays_derived_member ... ok
+test missed_recovers_in_grace_by_restake_and_pay ... ok
+test outsider_cannot_derive_invite_code_from_pool_account ... ignored, P-2: invite code is derivable from public pool state (see docs/e2e-proof)
+test paid_member_cannot_be_defaulted_and_unpaid_only_after_deadline ... ok
+test paid_take_the_pot_missed_cannot_win ... ok
+test pending_member_can_leave_and_reclaim_stake ... ok
+test program_flow_create_join_stake_start_pay_draw ... ok
+test start_pool_refuses_until_every_joined_member_has_stake ... ok
+test start_pool_refuses_until_the_roster_is_full ... ok
+test ten_member_circle_pays_draws_and_refunds_every_seat ... ok
+test twenty_member_circle_can_start_pay_and_draw_max_roster ... ok
+test result: ok. 17 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 26.88s
+
+# ---
+# Earlier run, 2026-10-05, before the 5/10/20-seat and grace-period tests were added:
 
 running 11 tests
 test execute_draw_rejects_round_with_an_unpaid_member ... ok
