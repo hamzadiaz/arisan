@@ -2,7 +2,8 @@
 
 ## Phone demo (7 Oct): voice-over script
 
-**Video:** [`arisan-demo-phone.mp4`](arisan-demo-phone.mp4), 1920×1080, 30 fps, 1:55, no sound. The captions are burned into the picture, so don't add a caption track.
+**Master:** [`arisan-demo-phone-vo.mp4`](arisan-demo-phone-vo.mp4) — same picture, Gemini voice, Lyria score. Captions stay in the picture.
+**Silent cut:** [`arisan-demo-phone.mp4`](arisan-demo-phone.mp4), 1920×1080, 30 fps, 1:55, no sound. The captions are burned into the picture, so don't add a caption track.
 
 **Voice timing:** [`arisan-phone-voiceover.srt`](arisan-phone-voiceover.srt) has every line to read, at its time (the Read column below). Its name doesn't match the video's, so players won't show it as a second set of captions.
 
