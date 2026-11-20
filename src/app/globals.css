@@ -140,7 +140,15 @@
     outline-color: var(--focus);
   }
 
+  /* The page never rubber-bands (Hamza): no elastic overscroll on the document, so the header and footer stay put.
+     Inner scrollers (menus, sheets, the walkthrough) keep their own `overscroll-behavior: contain`. */
+  html,
+  body {
+    overscroll-behavior: none;
+  }
+
   html {
+    background: var(--background);
     scroll-padding-top: calc(62px + env(safe-area-inset-top));
     scroll-padding-bottom: calc(96px + env(safe-area-inset-bottom));
   }
